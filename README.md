@@ -81,28 +81,52 @@ ISAPI 是一个基于 Docker 的轻量级系统监控解决方案，专为软路
    docker-compose up -d
    ```
 
-### 方法二：在其他设备上构建后导出导入
+### 方法二：使用GitHub Actions自动构建并部署（推荐）
 
-如果您的软路由性能较低或无法直接构建镜像，可以采用这种方式：
+如果您在Windows系统上遇到Docker构建问题，或者希望自动化构建流程，可以使用GitHub Actions：
 
-1. 在一台安装了 Docker 的设备上克隆并构建：
+1. 在GitHub仓库中创建Docker Hub访问令牌：
+   - 登录Docker Hub
+   - 进入Account Settings → Security
+   - 创建新的Access Token
+
+2. 在GitHub仓库中配置Secrets：
+   - 进入仓库Settings → Secrets and variables → Actions
+   - 添加以下两个Secrets：
+     - `DOCKER_USERNAME`: 您的Docker Hub用户名
+     - `DOCKER_PASSWORD`: 您刚才创建的访问令牌
+
+3. GitHub Actions会自动在每次push时构建并推送到Docker Hub
+
+4. 在软路由上直接拉取镜像：
+   ```bash
+   docker pull wanvfx/isapi:latest
+   ```
+
+### 方法三：在其他设备上构建后导出导入
+
+如果您的构建环境遇到问题，可以采用此方法：
+
+1. 在一台能够正常运行Docker的Linux设备上克隆并构建：
    ```bash
    git clone https://github.com/wanvfx/isapi.git
    cd isapi
-   docker build -t isapi .
+   docker build -t isapi:latest .
    ```
 
 2. 导出镜像为 tar 文件：
    ```bash
-   docker save -o isapi.tar isapi
+   docker save -o isapi.tar isapi:latest
    ```
 
 3. 将 isapi.tar 文件传输到软路由上（可通过 scp、U盘等方式）
 
 4. 在软路由上导入镜像：
-   ```bash
-   docker load -i isapi.tar
-   ```
+   - 打开 iStoreOS 的 Docker 管理界面
+   - 导航到"镜像文件"页面
+   - 点击"导入镜像文件"按钮
+   - 选择"本地文件路径"并输入 isapi.tar 文件的完整路径
+   - 点击"导入配置信息"按钮完成导入
 
 5. 运行容器：
    ```bash
@@ -116,6 +140,42 @@ ISAPI 是一个基于 Docker 的轻量级系统监控解决方案，专为软路
      --restart unless-stopped \
      isapi
    ```
+
+### 方法四：使用 iStoreOS 的"解析 CLI"模式直接创建容器
+
+如果您使用的是 iStoreOS 系统（如 EasePi R1 软路由），可以通过系统内置的"解析 CLI"功能快速部署容器：
+
+1. 确保您已经通过以下任一方式准备好了 isapi 镜像：
+   - 在软路由上直接构建
+   - 从其他设备导出导入
+   - 从镜像仓库拉取（如果已推送）
+
+2. 打开 iStoreOS 的 Docker 管理界面
+
+3. 选择"创建新的 Docker 容器"
+
+4. 切换到"解析 CLI"标签页
+
+5. 在命令输入框中粘贴以下命令：
+   ```bash
+   docker run -d \
+     --name isapi \
+     --privileged \
+     -p 15130:15130 \
+     -v /proc:/proc:ro \
+     -v /sys:/sys:ro \
+     -v /etc:/etc:ro \
+     --restart unless-stopped \
+     isapi
+   ```
+
+6. 点击"应用"按钮，系统将自动解析命令并创建容器
+
+> **注意事项**：
+> - 该方法仅适用于已存在 isapi 镜像的情况
+> - 确保使用的镜像与您的设备架构兼容（如 ARMv8）
+> - `--privileged` 参数是必需的，以便容器可以访问系统信息
+> - 如果需要自定义环境变量，可以在命令中添加 `-e` 参数
 
 ## 验证部署结果
 

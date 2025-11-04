@@ -94,7 +94,14 @@ ISAPI 是一个基于 Docker 的轻量级系统监控解决方案，专为软路
    - 点击"Generate"生成令牌
    - **重要**：复制生成的令牌并妥善保管，关闭页面后将无法再次查看
 
-2. 在GitHub仓库中配置Secrets：
+2. 在Docker Hub上创建仓库：
+   - 登录Docker Hub
+   - 点击"Create Repository"
+   - 在"Name"字段中输入"isapi"
+   - 选择仓库为"Public"（公开）
+   - 点击"Create"完成创建
+
+3. 在GitHub仓库中配置Secrets：
    - 进入仓库Settings → Secrets and variables → Actions
    - 点击"New repository secret"添加以下两个Secrets：
      - Name: `DOCKER_USERNAME` 
@@ -102,9 +109,9 @@ ISAPI 是一个基于 Docker 的轻量级系统监控解决方案，专为软路
      - Name: `DOCKER_PASSWORD`
        Value: 您刚才创建的访问令牌
 
-3. GitHub Actions会自动在每次push时构建并推送到Docker Hub
+4. GitHub Actions会自动在每次push时构建并推送到Docker Hub
 
-4. 在软路由上直接拉取镜像：
+5. 在软路由上直接拉取镜像：
    ```bash
    docker pull wanvfx/isapi:latest
    ```
@@ -243,15 +250,39 @@ failed to fetch oauth token: unexpected status from GET request to https://auth.
 4. 重新触发GitHub Actions构建：
    - 可以通过推送新的提交或重新运行失败的工作流
 
-### Docker Hub仓库不存在
+### Docker Hub仓库不存在或推送权限被拒绝
 
-如果遇到仓库不存在的错误，请先在Docker Hub上创建仓库：
+如果遇到如下错误：
+```
+push access denied, repository does not exist or may require authorization: server message: insufficient_scope: authorization failed
+```
 
-1. 登录Docker Hub
-2. 点击"Create Repository"
-3. 设置仓库名称为"isapi"（与GitHub用户名组合为wanvfx/isapi）
-4. 选择仓库为"Public"（公开）
-5. 点击"Create"完成创建
+请按以下步骤解决：
+
+1. 在Docker Hub上创建仓库：
+   - 登录Docker Hub
+   - 点击"Create Repository"
+   - 在"Name"字段中输入"isapi"
+   - 选择仓库为"Public"（公开）
+   - 点击"Create"完成创建
+
+2. 确保访问令牌具有正确的权限：
+   - 登录Docker Hub
+   - 进入Account Settings → Security
+   - 确认访问令牌具有"Read & Write"权限
+   - 如果权限不足，请删除旧令牌并创建新的
+
+3. 确认GitHub Secrets配置正确：
+   - 进入仓库Settings → Secrets and variables → Actions
+   - 确认`DOCKER_USERNAME`和`DOCKER_PASSWORD`的值正确无误
+
+### 镜像拉取失败
+
+如果在软路由上拉取镜像时遇到问题，请尝试以下解决方案：
+
+1. 检查网络连接是否正常
+2. 确认镜像名称是否正确：`wanvfx/isapi:latest`
+3. 如果网络受限，可以尝试使用国内镜像源或代理
 
 ## 验证部署结果
 

@@ -6,6 +6,8 @@ ISAPI 是一个基于 Docker 的轻量级系统监控解决方案，专为软路
 
 本工具提供了一个 Web 界面，用户可以通过浏览器方便地查看系统状态、修改配置参数以及查看运行日志。
 
+项目地址：[https://github.com/wanvfx/isapi](https://github.com/wanvfx/isapi)
+
 ## 功能特性
 
 - 实时监控 CPU 使用率
@@ -36,7 +38,7 @@ ISAPI 是一个基于 Docker 的轻量级系统监控解决方案，专为软路
 
 1. 在软路由上克隆项目仓库：
    ```bash
-   git clone https://github.com/您的用户名/isapi.git
+   git clone https://github.com/wanvfx/isapi.git
    cd isapi
    ```
 
@@ -85,7 +87,7 @@ ISAPI 是一个基于 Docker 的轻量级系统监控解决方案，专为软路
 
 1. 在一台安装了 Docker 的设备上克隆并构建：
    ```bash
-   git clone https://github.com/您的用户名/isapi.git
+   git clone https://github.com/wanvfx/isapi.git
    cd isapi
    docker build -t isapi .
    ```
@@ -135,6 +137,43 @@ ISAPI 是一个基于 Docker 的轻量级系统监控解决方案，专为软路
    打开浏览器，访问 `http://您的软路由IP:15130`
    您应该能看到系统监控仪表板
 
+## 使用说明
+
+### 部署方法
+
+### 方法一：使用 docker-compose（推荐）
+
+```bash
+# 克隆或下载项目
+git clone https://github.com/wanvfx/isapi.git
+cd isapi
+
+# 启动容器
+docker-compose up -d
+```
+
+### 方法二：直接使用 docker 命令
+
+```bash
+# 克隆项目
+git clone https://github.com/wanvfx/isapi.git
+cd isapi
+
+# 构建镜像
+docker build -t isapi .
+
+# 启动容器
+docker run -d \
+  --name isapi \
+  --privileged \
+  --network host \
+  -v /proc:/proc:ro \
+  -v /sys:/sys:ro \
+  -v /etc:/etc:ro \
+  -e PORT=15130 \
+  -e REFRESH_INTERVAL=5 \
+  isapi
+```
 
 ## 环境变量
 

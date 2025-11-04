@@ -20,37 +20,121 @@ ISAPI 是一个基于 Docker 的轻量级系统监控解决方案，专为软路
 - 通过 HTTP API 提供 JSON 格式数据
 - 轻量级容器，资源占用少
 
-## 部署方法
+## 部署到软路由详细教程
 
-### 方法一：使用 docker-compose（推荐）
+### 准备工作
 
-```bash
-# 克隆或下载项目
-git clone <项目地址>
-cd isapi
+在开始部署之前，请确认您的软路由满足以下条件：
 
-# 启动容器
-docker-compose up -d
-```
+1. 已经安装 Docker 服务
+2. 确保软路由可以访问互联网（用于下载基础镜像和安装依赖包）
+3. 确保目标端口（默认为15130）未被其他服务占用
 
-### 方法二：直接使用 docker 命令
+### 方法一：在软路由上直接构建和运行（推荐）
 
-```bash
-# 构建镜像
-docker build -t isapi .
+这是最简单的部署方式，适用于大多数情况。
 
-# 启动容器
-docker run -d \
-  --name isapi \
-  --privileged \
-  --network host \
-  -v /proc:/proc:ro \
-  -v /sys:/sys:ro \
-  -v /etc:/etc:ro \
-  -e PORT=15130 \
-  -e REFRESH_INTERVAL=5 \
-  isapi
-```
+1. 在软路由上克隆项目仓库：
+   ```bash
+   git clone https://github.com/您的用户名/isapi.git
+   cd isapi
+   ```
+
+2. 构建 Docker 镜像：
+   ```bash
+   docker build -t isapi .
+   ```
+   
+   构建过程会自动完成以下步骤：
+   - 使用 Alpine Linux 作为基础镜像
+   - 安装必要系统工具（bash, jq, curl, procps 等）
+   - 复制监控脚本和 Web 界面文件
+   - 设置执行权限
+
+3. 运行容器：
+   ```bash
+   docker run -d \
+     --name isapi \
+     --privileged \
+     -p 15130:15130 \
+     -v /proc:/proc:ro \
+     -v /sys:/sys:ro \
+     -v /etc:/etc:ro \
+     --restart unless-stopped \
+     isapi
+   ```
+
+   参数说明：
+   - `-d`: 后台运行容器
+   - `--name isapi`: 给容器命名为 isapi
+   - `--privileged`: 特权模式运行（必须，用于访问系统信息）
+   - `-p 15130:15130`: 映射端口，主机端口:容器端口
+   - `-v /proc:/proc:ro`: 挂载 /proc 目录（只读）
+   - `-v /sys:/sys:ro`: 挂载 /sys 目录（只读）
+   - `-v /etc:/etc:ro`: 挂载 /etc 目录（只读）
+   - `--restart unless-stopped`: 自动重启策略
+
+   或者使用 docker-compose（如果软路由上安装了 docker-compose）：
+   ```bash
+   docker-compose up -d
+   ```
+
+### 方法二：在其他设备上构建后导出导入
+
+如果您的软路由性能较低或无法直接构建镜像，可以采用这种方式：
+
+1. 在一台安装了 Docker 的设备上克隆并构建：
+   ```bash
+   git clone https://github.com/您的用户名/isapi.git
+   cd isapi
+   docker build -t isapi .
+   ```
+
+2. 导出镜像为 tar 文件：
+   ```bash
+   docker save -o isapi.tar isapi
+   ```
+
+3. 将 isapi.tar 文件传输到软路由上（可通过 scp、U盘等方式）
+
+4. 在软路由上导入镜像：
+   ```bash
+   docker load -i isapi.tar
+   ```
+
+5. 运行容器：
+   ```bash
+   docker run -d \
+     --name isapi \
+     --privileged \
+     -p 15130:15130 \
+     -v /proc:/proc:ro \
+     -v /sys:/sys:ro \
+     -v /etc:/etc:ro \
+     --restart unless-stopped \
+     isapi
+   ```
+
+## 验证部署结果
+
+部署完成后，您可以通过以下方式验证：
+
+1. 检查容器运行状态：
+   ```bash
+   docker ps
+   ```
+   应该能看到名为 isapi 的容器正在运行
+
+2. 查看容器日志：
+   ```bash
+   docker logs isapi
+   ```
+   如果部署成功，应该能看到类似 "Starting ISAPI service on port 15130" 的日志输出
+
+3. 通过浏览器访问 Web 界面：
+   打开浏览器，访问 `http://您的软路由IP:15130`
+   您应该能看到系统监控仪表板
+
 
 ## 环境变量
 

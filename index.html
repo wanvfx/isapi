@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ISAPI系统监控</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        header {
+            background-color: #333;
+            color: white;
+            padding: 1rem;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .card h3 {
+            margin-top: 0;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .checkbox-group input[type="checkbox"] {
+            width: auto;
+            margin-right: 10px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #logContainer {
+            background: #333;
+            color: #0f0;
+            padding: 15px;
+            border-radius: 5px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+        .status-running {
+            background-color: #28a745;
+        }
+        .status-stopped {
+            background-color: #dc3545;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>ISAPI系统监控</h1>
+        </header>
+
+        <div class="dashboard">
+            <div class="card">
+                <h3>系统状态</h3>
+                <p><span class="status-indicator status-running"></span> 运行中</p>
+                <div id="systemInfo"></div>
+            </div>
+
+            <div class="card">
+                <h3>配置参数</h3>
+                <form id="configForm">
+                    <div class="form-group">
+                        <label for="port">端口:</label>
+                        <input type="number" id="port" name="port" value="15130" min="1" max="65535">
+                    </div>
+                    <div class="form-group">
+                        <label for="refreshInterval">刷新间隔 (秒):</label>
+                        <input type="number" id="refreshInterval" name="refreshInterval" value="5" min="1" max="3600">
+                    </div>
+                    <h4>监控项设置</h4>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="enableTimestamp" name="enableTimestamp" checked>
+                        <label for="enableTimestamp">获取时间戳</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="enableLoadAvg" name="enableLoadAvg" checked>
+                        <label for="enableLoadAvg">获取系统负载</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="enableCpuUsage" name="enableCpuUsage" checked>
+                        <label for="enableCpuUsage">获取CPU使用率</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="enableMemoryInfo" name="enableMemoryInfo" checked>
+                        <label for="enableMemoryInfo">获取内存信息</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="enableTemperature" name="enableTemperature" checked>
+                        <label for="enableTemperature">获取温度信息</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="enableNetworkInfo" name="enableNetworkInfo" checked>
+                        <label for="enableNetworkInfo">获取网络接口信息</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="enableDiskInfo" name="enableDiskInfo" checked>
+                        <label for="enableDiskInfo">获取磁盘使用情况</label>
+                    </div>
+                    <button type="submit">保存配置</button>
+                    <button type="button" id="resetConfig">重置为默认</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>运行日志</h3>
+            <div id="logContainer">[系统] 监控服务已启动...</div>
+            <button id="clearLog" style="margin-top: 10px;">清空日志</button>
+            <button id="refreshLog" style="margin-top: 10px;">刷新日志</button>
+        </div>
+    </div>
+
+    <script>
+        // 当前配置
+        let currentConfig = {};
+        
+        // 页面加载时获取当前配置
+        window.addEventListener('load', function() {
+            fetchConfig();
+            updateSystemInfo();
+            fetchLog();
+            setInterval(updateSystemInfo, 5000); // 每5秒更新一次
+            setInterval(fetchLog, 3000); // 每3秒刷新一次日志
+        });
+        
+        // 获取当前配置
+        function fetchConfig() {
+            fetch('/api/config')
+                .then(response => response.json())
+                .then(config => {
+                    currentConfig = config;
+                    document.getElementById('enableTimestamp').checked = config.enable_timestamp === 'true';
+                    document.getElementById('enableLoadAvg').checked = config.enable_load_avg === 'true';
+                    document.getElementById('enableCpuUsage').checked = config.enable_cpu_usage === 'true';
+                    document.getElementById('enableMemoryInfo').checked = config.enable_memory_info === 'true';
+                    document.getElementById('enableTemperature').checked = config.enable_temperature === 'true';
+                    document.getElementById('enableNetworkInfo').checked = config.enable_network_info === 'true';
+                    document.getElementById('enableDiskInfo').checked = config.enable_disk_info === 'true';
+                })
+                .catch(error => {
+                    console.error('获取配置失败:', error);
+                });
+        }
+
+        // 更新系统信息
+        function updateSystemInfo() {
+            fetch('/api/status')
+                .then(response => response.json())
+                .then(data => {
+                    const systemInfo = document.getElementById('systemInfo');
+                    let infoHtml = '';
+                    
+                    // 显示所有监控项的状态
+                    infoHtml += `<p><strong>获取时间戳:</strong> ${data.timestamp || '未启用'}</p>`;
+                    
+                    if (data.system) {
+                        infoHtml += `<p><strong>获取系统负载:</strong> ${data.system.load_avg || '未启用'}</p>`;
+                        if (data.system.cpu_usage) {
+                            infoHtml += `<p><strong>获取CPU使用率:</strong> ${data.system.cpu_usage.usage || 'N/A'}%</p>`;
+                        } else {
+                            infoHtml += `<p><strong>获取CPU使用率:</strong> 未启用</p>`;
+                        }
+                        if (data.system.memory) {
+                            infoHtml += `<p><strong>获取内存信息:</strong> ${data.system.memory.usage || 'N/A'}%</p>`;
+                        } else {
+                            infoHtml += `<p><strong>获取内存信息:</strong> 未启用</p>`;
+                        }
+                        if (data.system.temperature) {
+                            infoHtml += `<p><strong>获取温度信息:</strong> ${data.system.temperature.celsius !== null ? data.system.temperature.celsius + '°C' : '未检测到'}</p>`;
+                        } else {
+                            infoHtml += `<p><strong>获取温度信息:</strong> 未启用</p>`;
+                        }
+                        if (data.system.network) {
+                            infoHtml += `<p><strong>获取网络接口信息:</strong> ${data.system.network.length || 0}个接口</p>`;
+                        } else {
+                            infoHtml += `<p><strong>获取网络接口信息:</strong> 未启用</p>`;
+                        }
+                        if (data.system.disk) {
+                            infoHtml += `<p><strong>获取磁盘使用情况:</strong> ${data.system.disk.usage || 'N/A'}</p>`;
+                        } else {
+                            infoHtml += `<p><strong>获取磁盘使用情况:</strong> 未启用</p>`;
+                        }
+                    } else {
+                        infoHtml += `<p><strong>获取系统负载:</strong> 未启用</p>`;
+                        infoHtml += `<p><strong>获取CPU使用率:</strong> 未启用</p>`;
+                        infoHtml += `<p><strong>获取内存信息:</strong> 未启用</p>`;
+                        infoHtml += `<p><strong>获取温度信息:</strong> 未启用</p>`;
+                        infoHtml += `<p><strong>获取网络接口信息:</strong> 未启用</p>`;
+                        infoHtml += `<p><strong>获取磁盘使用情况:</strong> 未启用</p>`;
+                    }
+                    
+                    systemInfo.innerHTML = infoHtml;
+                })
+                .catch(error => {
+                    console.error('获取系统信息失败:', error);
+                    document.getElementById('systemInfo').innerHTML = '<p>获取系统信息失败</p>';
+                });
+        }
+
+        // 获取日志
+        function fetchLog() {
+            fetch('/api/log')
+                .then(response => response.text())
+                .then(data => {
+                    document.getElementById('logContainer').innerHTML = data;
+                    const logContainer = document.getElementById('logContainer');
+                    logContainer.scrollTop = logContainer.scrollHeight;
+                })
+                .catch(error => {
+                    console.error('获取日志失败:', error);
+                });
+        }
+
+        // 添加日志
+        function addLog(message) {
+            const logContainer = document.getElementById('logContainer');
+            const timestamp = new Date().toISOString();
+            logContainer.innerHTML += `[${timestamp}] ${message}\n`;
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        // 保存配置
+        document.getElementById('configForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const config = {
+                enable_timestamp: document.getElementById('enableTimestamp').checked.toString(),
+                enable_load_avg: document.getElementById('enableLoadAvg').checked.toString(),
+                enable_cpu_usage: document.getElementById('enableCpuUsage').checked.toString(),
+                enable_memory_info: document.getElementById('enableMemoryInfo').checked.toString(),
+                enable_temperature: document.getElementById('enableTemperature').checked.toString(),
+                enable_network_info: document.getElementById('enableNetworkInfo').checked.toString(),
+                enable_disk_info: document.getElementById('enableDiskInfo').checked.toString()
+            };
+            
+            // 发送配置到后端
+            fetch('/api/config', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(config)
+            })
+            .then(response => response.json())
+            .then(data => {
+                addLog('配置已更新，将在下次数据收集时生效');
+                alert(data.message);
+            })
+            .catch(error => {
+                console.error('保存配置失败:', error);
+                addLog(`配置保存失败: ${error.message}`);
+                alert('配置保存失败');
+            });
+        });
+
+        // 重置为默认配置
+        document.getElementById('resetConfig').addEventListener('click', function() {
+            document.getElementById('enableTimestamp').checked = true;
+            document.getElementById('enableLoadAvg').checked = true;
+            document.getElementById('enableCpuUsage').checked = true;
+            document.getElementById('enableMemoryInfo').checked = true;
+            document.getElementById('enableTemperature').checked = true;
+            document.getElementById('enableNetworkInfo').checked = true;
+            document.getElementById('enableDiskInfo').checked = true;
+            addLog('配置已重置为默认值');
+        });
+
+        // 清空日志
+        document.getElementById('clearLog').addEventListener('click', function() {
+            document.getElementById('logContainer').innerHTML = '';
+            addLog('日志已清空');
+        });
+
+        // 刷新日志
+        document.getElementById('refreshLog').addEventListener('click', function() {
+            fetchLog();
+        });
+    </script>
+</body>
+</html>

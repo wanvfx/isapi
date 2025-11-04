@@ -88,13 +88,19 @@ ISAPI 是一个基于 Docker 的轻量级系统监控解决方案，专为软路
 1. 在GitHub仓库中创建Docker Hub访问令牌：
    - 登录Docker Hub
    - 进入Account Settings → Security
-   - 创建新的Access Token
+   - 点击"New Access Token"创建新的访问令牌
+   - 在"Description"中输入描述（如"github-actions-isapi"）
+   - 在"Access permissions"中选择"Read & Write"权限
+   - 点击"Generate"生成令牌
+   - **重要**：复制生成的令牌并妥善保管，关闭页面后将无法再次查看
 
 2. 在GitHub仓库中配置Secrets：
    - 进入仓库Settings → Secrets and variables → Actions
-   - 添加以下两个Secrets：
-     - `DOCKER_USERNAME`: 您的Docker Hub用户名
-     - `DOCKER_PASSWORD`: 您刚才创建的访问令牌
+   - 点击"New repository secret"添加以下两个Secrets：
+     - Name: `DOCKER_USERNAME` 
+       Value: 您的Docker Hub用户名
+     - Name: `DOCKER_PASSWORD`
+       Value: 您刚才创建的访问令牌
 
 3. GitHub Actions会自动在每次push时构建并推送到Docker Hub
 
@@ -209,6 +215,43 @@ COPY root/usr/share/wechatpush/api/ ./api/
 - linux/amd64 (x86_64)
 - linux/arm64 (ARM64)
 - linux/arm/v7 (ARM32)
+
+### Docker Hub访问令牌权限不足（401 Unauthorized）
+
+如果在使用GitHub Actions自动构建时遇到如下错误：
+```
+failed to fetch oauth token: unexpected status from GET request to https://auth.docker.io/token: 401 Unauthorized: access token has insufficient scopes
+```
+
+请按以下步骤解决：
+
+1. 删除旧的访问令牌：
+   - 登录Docker Hub
+   - 进入Account Settings → Security
+   - 找到并删除之前创建的访问令牌
+
+2. 创建新的具有正确权限的访问令牌：
+   - 点击"New Access Token"
+   - 在"Description"中输入描述（如"github-actions-isapi"）
+   - **关键**：在"Access permissions"中选择"Read & Write"权限（而不是默认的"Read-only"）
+   - 点击"Generate"生成令牌
+
+3. 更新GitHub仓库中的Secrets：
+   - 进入仓库Settings → Secrets and variables → Actions
+   - 更新`DOCKER_PASSWORD`的值为新生成的访问令牌
+
+4. 重新触发GitHub Actions构建：
+   - 可以通过推送新的提交或重新运行失败的工作流
+
+### Docker Hub仓库不存在
+
+如果遇到仓库不存在的错误，请先在Docker Hub上创建仓库：
+
+1. 登录Docker Hub
+2. 点击"Create Repository"
+3. 设置仓库名称为"isapi"（与GitHub用户名组合为wanvfx/isapi）
+4. 选择仓库为"Public"（公开）
+5. 点击"Create"完成创建
 
 ## 验证部署结果
 

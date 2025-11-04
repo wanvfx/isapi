@@ -20,8 +20,6 @@ COPY docker-monitor.sh .
 # 复制Web界面文件
 COPY index.html .
 
-# 复制API文件
-COPY root/usr/share/wechatpush/api/ ./api/
 
 # 创建必要的目录
 RUN mkdir -p /tmp/wechatpush

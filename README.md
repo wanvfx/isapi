@@ -177,6 +177,39 @@ ISAPI 是一个基于 Docker 的轻量级系统监控解决方案，专为软路
 > - `--privileged` 参数是必需的，以便容器可以访问系统信息
 > - 如果需要自定义环境变量，可以在命令中添加 `-e` 参数
 
+## 常见问题及解决方案
+
+### 构建时出现"/root/usr/share/wechatpush/api: not found"错误
+
+这是由于Dockerfile中引用了一个不存在的目录导致的。我们已经修复了这个问题，最新版本的Dockerfile已移除了相关指令。
+
+如果您使用的是旧版本，请更新到最新代码：
+```bash
+git pull origin main
+```
+
+或者手动修改Dockerfile，删除以下行：
+```dockerfile
+# 复制API文件
+COPY root/usr/share/wechatpush/api/ ./api/
+```
+
+### 在Windows上构建Docker镜像失败
+
+如果您在Windows系统上遇到Docker构建问题，请尝试以下解决方案：
+
+1. 确保已安装并运行Docker Desktop
+2. 切换到Linux容器模式
+3. 启用WSL2后端支持
+4. 在WSL2的Ubuntu环境中构建镜像
+
+### 架构兼容性问题
+
+为了确保镜像能在ARM架构的软路由上正常运行，GitHub Actions工作流已配置支持多平台构建：
+- linux/amd64 (x86_64)
+- linux/arm64 (ARM64)
+- linux/arm/v7 (ARM32)
+
 ## 验证部署结果
 
 部署完成后，您可以通过以下方式验证：

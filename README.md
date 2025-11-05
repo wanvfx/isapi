@@ -19,169 +19,6 @@ ISAPI 是一个基于 Docker 的轻量级系统监控解决方案，专为软路
 - 通过 HTTP API 提供 JSON 格式数据
 - 支持 CORS，便于前端调用
 
-## 使用说明
-
-### 快速开始
-
-1. 拉取 Docker 镜像：
-
-```
-docker pull zoyayaayaya/isapi:latest
-```
-
-2. 运行容器：
-
-```
-docker run -d \
-  --name isapi \
-  --privileged \
-  -p 15130:15130 \
-  -v /proc:/proc:ro \
-  -v /sys:/sys:ro \
-  -v /etc:/etc:ro \
-  -e PORT=15130 \
-  -e REFRESH_INTERVAL=5 \
-  --restart unless-stopped \
-  zoyayaayaya/isapi:latest
-```
-
-3. 验证部署：
-
-```
-docker ps
-```
-
-应该能看到名为 isapi 的容器正在运行
-
-```
-docker logs isapi
-```
-
-如果部署成功，应该能看到类似 "Starting ISAPI service on port 15130" 的日志输出
-
-4. 访问 API 接口：
-
-访问 `http://您的软路由IP:15130` 查看 API 接口信息
-
-## 环境变量
-
-| 变量名             | 默认值 | 说明                   |
-|------------------|-------|------------------------|
-| PORT             | 15130 | HTTP 服务监听端口        |
-| REFRESH_INTERVAL | 5     | 系统信息刷新间隔（秒）    |
-
-
-### API 接口
-
-访问根路径 [/](file:///d:/我的文档/Documents/GitHub/isapi/README.md) 可以获取所有可用 API 接口的说明信息。
-
-### 获取系统状态
-
-```
-GET http://<router-ip>:15130/api/status
-```
-
-返回系统监控数据，包括 CPU 使用率、内存信息、温度、网络接口和磁盘使用情况等。
-
-### 获取运行日志
-
-```
-GET http://<router-ip>:15130/api/log
-```
-
-返回最近的运行日志信息。
-
-### 获取配置
-
-```
-GET http://<router-ip>:15130/api/config
-```
-
-返回当前的配置信息。
-
-### 更新配置
-
-```
-POST http://<router-ip>:15130/api/config
-```
-
-通过 POST 请求发送 JSON 格式的配置数据来更新配置。
-
-## 安全注意事项
-
-1. 本工具需要特权模式运行以获取系统信息，请确保在受信任的环境中使用
-2. API 接口默认没有身份验证机制，建议在内网环境中使用
-3. 如需在公网环境中使用，建议添加反向代理和身份验证
-
-## API 接口使用说明
-
-构建并启动容器后，可以通过以下 API 接口获取系统信息：
-
-API 接口包含以下功能：
-
-1. **系统状态接口** (`/api/status`)：返回完整的系统监控数据
-2. **日志接口** (`/api/log`)：返回运行日志信息
-3. **配置接口** (`/api/config`)：
-   - GET 请求：获取当前配置
-   - POST 请求：更新配置信息
-
-默认情况下，所有监控项都处于启用状态。用户可以通过向 `/api/config` 发送 POST 请求来启用或禁用特定的监控功能：
-
-```json
-{
-  "enable_timestamp": "true",
-  "enable_load_avg": "true",
-  "enable_cpu_usage": "true",
-  "enable_memory_info": "true",
-  "enable_temperature": "true",
-  "enable_network_info": "true",
-  "enable_disk_info": "true"
-}
-```
-
-## 故障排除
-
-### 容器无法启动
-- 检查 Docker 是否正常运行
-- 确认系统支持 Linux 容器
-
-### 无法访问 API 接口
-- 检查防火墙设置
-- 确认端口是否正确映射
-- 查看容器日志：`docker logs isapi`
-
-### 监控数据不准确
-- 检查相关系统文件是否可访问
-- 确认容器是否以特权模式运行
-
-
-## 配置说明
-
-```
-# ISAPI - 系统监控工具
-
-## 简介
-
-ISAPI 是一个基于 Docker 的轻量级系统监控解决方案，专为软路由设备设计。通过在软路由上部署该 Docker 容器，可以实时监控系统的各项关键指标，包括 CPU 使用率、内存使用情况、温度、网络接口状态和磁盘使用情况等。
-
-本工具提供了一个 Web 界面，用户可以通过浏览器方便地查看系统状态、修改配置参数以及查看运行日志。
-
-项目地址：[https://github.com/wanvfx/isapi](https://github.com/wanvfx/isapi)
-
-## 功能特性
-
-- 实时监控 CPU 使用率
-- 内存使用情况监控
-- 系统温度监控
-- 网络接口流量统计
-- 磁盘使用情况监控
-- 可配置的监控项（可选择启用/禁用特定监控功能）
-- 通过 Web 界面查看系统状态
-- 通过 Web 界面修改配置参数
-- 实时查看运行日志
-- 通过 HTTP API 提供 JSON 格式数据
-- 轻量级容器，资源占用少
-
 ## 快速部署（推荐）
 
 由于项目已通过 GitHub Actions 自动构建并发布到 Docker Hub，您可以直接从 Docker Hub 拉取镜像进行部署：
@@ -214,7 +51,7 @@ docker run -d \
 - `-v /etc:/etc:ro`: 挂载 /etc 目录（只读）
 - `--restart unless-stopped`: 自动重启策略
 
-部署完成后，通过浏览器访问 `http://您的软路由IP:15130` 即可使用 Web 界面。
+部署完成后，访问 `http://您的软路由IP:15130` 查看 API 接口信息。
 
 ## 在 iStoreOS 上部署
 
@@ -264,11 +101,10 @@ docker run -d \
    ```bash
    docker logs isapi
    ```
-   如果部署成功，应该能看到类似 "Starting ISAPI service on port 15130" 的日志输出
+   如果部署成功，应该能看到类似 "Starting ISAPI service on port 15130" 的日志输出，其中会包含所有可用API地址的说明
 
-3. 通过浏览器访问 Web 界面：
-   打开浏览器，访问 `http://您的软路由IP:15130`
-   您应该能看到系统监控仪表板
+3. 访问API接口：
+   使用curl命令或浏览器访问 `http://您的软路由IP:15130` 获取API接口说明信息
 
 ## 环境变量
 
@@ -277,50 +113,37 @@ docker run -d \
 | PORT             | 15130 | HTTP 服务监听端口        |
 | REFRESH_INTERVAL | 5     | 系统信息刷新间隔（秒）    |
 
-## Web 界面使用说明
+## API 接口使用说明
 
-构建并启动容器后，可以通过浏览器访问 `http://your-router-ip:15130/` 来使用 Web 界面。
+构建并启动容器后，可以通过以下API端点获取系统信息：
 
-Web 界面包含以下功能区域：
+### 可用API端点
 
-1. **系统状态**：显示当前启用的监控项及其数值
-2. **配置参数**：
-   - 端口设置
-   - 刷新间隔设置
-   - 监控项启用/禁用设置
-3. **运行日志**：实时显示系统运行日志
+访问根路径 [/](file:///d:/我的文档/Documents/GitHub/isapi/README.md) 可以获取所有可用API端点的说明信息。
 
-### 监控项配置
-
-默认情况下，所有监控项都处于启用状态。用户可以通过 Web 界面的复选框来启用或禁用特定的监控功能：
-
-- 获取时间戳
-- 获取系统负载
-- 获取CPU使用率
-- 获取内存信息
-- 获取温度信息
-- 获取网络接口信息
-- 获取磁盘使用情况
-
-## API 接口
-
-### 获取系统状态
+### 系统状态接口
 
 ```
 GET http://<router-ip>:15130/api/status
 ```
 
-### 获取运行日志
+返回系统监控数据，包括CPU使用率、内存信息、温度、网络接口和磁盘使用情况等。
+
+### 运行日志接口
 
 ```
 GET http://<router-ip>:15130/api/log
 ```
 
-### 获取配置
+返回最近的运行日志信息。
+
+### 配置接口
 
 ```
 GET http://<router-ip>:15130/api/config
 ```
+
+返回当前的配置信息。
 
 ### 更新配置
 
@@ -328,10 +151,28 @@ GET http://<router-ip>:15130/api/config
 POST http://<router-ip>:15130/api/config
 ```
 
+通过POST请求发送JSON格式的配置数据来更新配置。
+
+### 监控项配置
+
+默认情况下，所有监控项都处于启用状态。用户可以通过向 [/api/config](file:///d:/我的文档/Documents/GitHub/isapi/README.md) 发送POST请求来启用或禁用特定的监控功能：
+
+```json
+{
+  "enable_timestamp": "true",
+  "enable_load_avg": "true",
+  "enable_cpu_usage": "true",
+  "enable_memory_info": "true",
+  "enable_temperature": "true",
+  "enable_network_info": "true",
+  "enable_disk_info": "true"
+}
+```
+
 ## 安全注意事项
 
 1. 本工具需要特权模式运行以获取系统信息，请确保在受信任的环境中使用
-2. Web 界面默认没有身份验证机制，建议在内网环境中使用
+2. API 接口默认没有身份验证机制，建议在内网环境中使用
 3. 如需在公网环境中使用，建议添加反向代理和身份验证
 
 ## 性能影响
@@ -347,7 +188,7 @@ POST http://<router-ip>:15130/api/config
 - 检查 Docker 是否正常运行
 - 确认系统支持 Linux 容器
 
-### 无法访问 Web 界面
+### 无法访问 API 接口
 - 检查防火墙设置
 - 确认端口是否正确映射
 - 查看容器日志：`docker logs isapi`
@@ -355,3 +196,19 @@ POST http://<router-ip>:15130/api/config
 ### 监控数据不准确
 - 检查相关系统文件是否可访问
 - 确认容器是否以特权模式运行
+
+## 特别说明：在Windows Docker Desktop环境下运行
+
+如果在Windows Docker Desktop中运行本项目时遇到以下问题：
+- 页面显示乱码
+- 出现jq相关错误日志，如：
+
+  ```
+  jq: error (at <unknown>): string ("1051660\n0") cannot be parsed as a number
+  jq: invalid JSON text passed to --argjson
+  ```
+
+这是因为Windows和Linux系统的换行符不一致导致的。脚本已经针对此问题进行了优化处理，
+在最新版本中通过移除字符串中的`\r`和`\n`字符来解决此问题。
+
+请确保使用最新版本的脚本运行项目。

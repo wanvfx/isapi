@@ -374,31 +374,28 @@ start_http_server() {
     
     while true; do
         # 使用nc监听端口并处理请求
-        {
-            # 读取请求行
-            if IFS= read -r request_line; then
-                log_message "收到请求: $request_line"
-                
-                # 解析请求方法和路径
-                local request_method=$(echo "$request_line" | awk '{print $1}')
-                local request_path=$(echo "$request_line" | awk '{print $2}')
-                [ -z "$request_path" ] && request_path="/"
-                
-                log_message "处理请求: $request_method $request_path"
-                
-                # 读取并忽略请求头
-                local header_line
-                while IFS= read -r header_line && [ -n "$header_line" ]; do
-                    # 移除\r字符
-                    header_line=$(echo "$header_line" | tr -d '\r')
-                    # 检查是否为空行（请求头结束）
-                    [ -z "$header_line" ] && break
-                done
-                
-                # 处理请求
-                handle_request "$request_method" "$request_path" ""
+        local request_data=""
+        request_data=$(timeout 30 nc -l -p "$PORT" 2>/dev/null)
+        
+        if [ -n "$request_data" ]; then
+            # 解析请求行（第一行）
+            local request_line=$(echo "$request_data" | head -n 1)
+            log_message "收到请求: $request_line"
+            
+            # 解析请求方法和路径
+            local request_method=$(echo "$request_line" | awk '{print $1}')
+            local request_path=$(echo "$request_line" | awk '{print $2}')
+            [ -z "$request_path" ] && request_path="/"
+            
+            # 处理请求
+            local response=""
+            response=$(handle_request "$request_method" "$request_path" "")
+            
+            # 发送响应
+            if [ -n "$response" ]; then
+                echo "$response"
             fi
-        } | nc -l -p "$PORT" 2>/dev/null
+        fi
         
         sleep 0.1
     done
@@ -410,6 +407,9 @@ handle_request() {
     local request_method=$1
     local request_path=$2
     local content_length_header=$3
+    
+    # 清空输出缓冲区
+    exec >&-
 
     log_message "开始处理请求: $request_method $request_path"
     

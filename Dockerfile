@@ -10,16 +10,17 @@ RUN apk add --no-cache \
     lm-sensors \
     iproute2 \
     util-linux \
-    socat
+    netcat-openbsd
 
 # 创建工作目录
 WORKDIR /app
 
-# 复制ISAPI监控脚本
+# 复制ISAPI监控脚本和诊断脚本
 COPY docker-monitor.sh .
+COPY container-healthcheck.sh .
 
 # 设置脚本可执行权限
-RUN chmod +x docker-monitor.sh
+RUN chmod +x docker-monitor.sh container-healthcheck.sh
 
 # 创建日志和状态文件
 RUN touch /app/isapi.log /app/status.json /app/config.json

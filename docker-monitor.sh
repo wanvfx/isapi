@@ -399,9 +399,21 @@ start_http_server() {
             fi
         } | nc -l -p "$PORT" 2>/dev/null )
         
-        # 发送响应
+        # 发送响应（修复：直接输出响应而不是再次监听端口）
         if [ -n "$response" ]; then
-            echo "$response" | nc -l -p "$PORT" 2>/dev/null >/dev/null
+            echo -e "$response"
+        else
+            # 如果没有生成响应，则返回错误信息
+            local error_response="HTTP/1.1 500 Internal Server Error\r\n"
+            error_response+="Content-Type: application/json; charset=utf-8\r\n"
+            error_response+="Access-Control-Allow-Origin: *\r\n"
+            error_response+="Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+            error_response+="Access-Control-Allow-Headers: Content-Type\r\n"
+            error_response+="Content-Length: 21\r\n"
+            error_response+="Connection: close\r\n"
+            error_response+="\r\n"
+            error_response+='{"error": "Server error"}'
+            echo -e "$error_response"
         fi
         
         sleep 1

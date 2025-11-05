@@ -389,17 +389,22 @@ get_disk_info() {
 start_http_server() {
     log_message "HTTP服务器开始监听端口: ${PORT}"
     while true; do
-        # 使用一个简单的HTTP服务器实现
-        response=$(handle_http_request)
-        echo -e "$response"
-    done | nc -l -p $PORT -q 1 2>/dev/null || true
+        # 处理HTTP请求
+        handle_http_request | nc -l -p $PORT -q 1 2>/dev/null || true
+        # 短暂休眠以避免过于频繁的重启
+        sleep 0.1
+    done
 }
 
 # 处理HTTP请求
 handle_http_request() {
     # 读取请求行
-    read -r request_line
-    log_message "收到请求: $request_line"
+    if read -r request_line; then
+        log_message "收到请求: $request_line"
+    else
+        # 如果无法读取请求行，返回空响应
+        return
+    fi
     
     # 读取请求头，直到遇到空行
     while read -r header_line; do
@@ -557,4 +562,11 @@ handle_request() {
 
 # 启动HTTP服务器
 log_message "启动HTTP服务器，监听端口: ${PORT}"
-start_http_server
+
+# 使用while循环确保脚本持续运行
+while true; do
+    start_http_server
+    # 如果HTTP服务器退出，等待一段时间后重新启动
+    log_message "HTTP服务器退出，5秒后重新启动"
+    sleep 5
+done

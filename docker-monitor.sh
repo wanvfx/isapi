@@ -372,85 +372,40 @@ collect_status() {
 start_http_server() {
     log_message "HTTP服务器开始监听端口: ${PORT}"
     
-    # 检查socat命令是否存在
-    if ! command -v socat >/dev/null 2>&1; then
-        log_message "错误: socat命令未找到，尝试安装"
-        if command -v apk >/dev/null 2>&1; then
-            apk add --no-cache socat >/dev/null 2>&1
-        fi
-    fi
-    
-    # 确保socat命令存在
-    if ! command -v socat >/dev/null 2>&1; then
-        log_message "错误: 无法安装socat，使用nc作为备选"
-        # 使用nc作为备选方案
-        while true; do
-            # 创建临时文件存储响应
-            local response_file="/tmp/response_$$"
-            
-            # 读取请求并生成响应
-            {
-                # 读取请求行
-                if IFS= read -r request_line; then
-                    log_message "收到请求: $request_line"
-                    
-                    # 解析请求方法和路径
-                    local request_method=$(echo "$request_line" | awk '{print $1}')
-                    local request_path=$(echo "$request_line" | awk '{print $2}')
-                    [ -z "$request_path" ] && request_path="/"
-                    
-                    # 读取并忽略请求头
-                    local header_line
-                    while IFS= read -r header_line && [ -n "$header_line" ]; do
-                        # 移除\r字符
-                        header_line=$(echo "$header_line" | tr -d '\r')
-                        # 检查是否为空行（请求头结束）
-                        [ -z "$header_line" ] && break
-                    done
-                    
-                    # 处理请求并将响应写入文件
-                    handle_request "$request_method" "$request_path" "" > "$response_file"
-                fi
-            } | nc -l -p "$PORT" 2>/dev/null
-            
-            # 发送响应
-            if [ -f "$response_file" ]; then
-                cat "$response_file"
-                rm -f "$response_file"
+    while true; do
+        # 直接使用nc监听端口并处理请求
+        local response=""
+        response=$( {
+            # 读取请求行
+            if IFS= read -r request_line; then
+                log_message "收到请求: $request_line"
+                
+                # 解析请求方法和路径
+                local request_method=$(echo "$request_line" | awk '{print $1}')
+                local request_path=$(echo "$request_line" | awk '{print $2}')
+                [ -z "$request_path" ] && request_path="/"
+                
+                # 读取并忽略请求头
+                local header_line
+                while IFS= read -r header_line && [ -n "$header_line" ]; do
+                    # 移除\r字符
+                    header_line=$(echo "$header_line" | tr -d '\r')
+                    # 检查是否为空行（请求头结束）
+                    [ -z "$header_line" ] && break
+                done
+                
+                # 处理请求
+                handle_request "$request_method" "$request_path" ""
             fi
-            
-            sleep 0.1
-        done
-    else
-        log_message "使用socat启动HTTP服务器"
-        while true; do
-            {
-                # 读取请求行
-                if IFS= read -r request_line; then
-                    log_message "收到请求: $request_line"
-                    
-                    # 解析请求方法和路径
-                    local request_method=$(echo "$request_line" | awk '{print $1}')
-                    local request_path=$(echo "$request_line" | awk '{print $2}')
-                    [ -z "$request_path" ] && request_path="/"
-                    
-                    # 读取并忽略请求头
-                    local header_line
-                    while IFS= read -r header_line && [ -n "$header_line" ]; do
-                        # 移除\r字符
-                        header_line=$(echo "$header_line" | tr -d '\r')
-                        # 检查是否为空行（请求头结束）
-                        [ -z "$header_line" ] && break
-                    done
-                    
-                    # 处理请求
-                    handle_request "$request_method" "$request_path" ""
-                fi
-            } | socat TCP-LISTEN:$PORT,reuseaddr,fork -
-            
-            sleep 0.1
-        done
-    fi
+        } | nc -l -p "$PORT" 2>/dev/null )
+        
+        # 发送响应
+        if [ -n "$response" ]; then
+            echo "$response" | nc -l -p "$PORT" 2>/dev/null >/dev/null
+        fi
+        
+        sleep 1
+    done
 }
 
 

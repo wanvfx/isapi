@@ -372,47 +372,85 @@ collect_status() {
 start_http_server() {
     log_message "HTTP服务器开始监听端口: ${PORT}"
     
-    # 检查nc命令是否存在
-    if ! command -v nc >/dev/null 2>&1 && ! command -v netcat >/dev/null 2>&1; then
-        log_message "错误: nc(netcat)命令未找到，请安装netcat以启用HTTP服务"
-        return 1
+    # 检查socat命令是否存在
+    if ! command -v socat >/dev/null 2>&1; then
+        log_message "错误: socat命令未找到，尝试安装"
+        if command -v apk >/dev/null 2>&1; then
+            apk add --no-cache socat >/dev/null 2>&1
+        fi
     fi
     
-    # 确定使用的命令
-    NC_CMD="nc"
-    if ! command -v nc >/dev/null 2>&1; then
-        NC_CMD="netcat"
-    fi
-    
-    # 使用nc监听端口并处理请求
-    while true; do
-        {
-            # 读取请求行
-            if IFS= read -r request_line; then
-                log_message "收到请求: $request_line"
-                
-                # 解析请求方法和路径
-                local request_method=$(echo "$request_line" | awk '{print $1}')
-                local request_path=$(echo "$request_line" | awk '{print $2}')
-                [ -z "$request_path" ] && request_path="/"
-                
-                # 读取并忽略请求头
-                local header_line
-                while IFS= read -r header_line && [ -n "$header_line" ]; do
-                    # 移除\r字符
-                    header_line=$(echo "$header_line" | tr -d '\r')
-                    # 检查是否为空行（请求头结束）
-                    [ -z "$header_line" ] && break
-                done
-                
-                # 处理请求
-                handle_request "$request_method" "$request_path" ""
+    # 确保socat命令存在
+    if ! command -v socat >/dev/null 2>&1; then
+        log_message "错误: 无法安装socat，使用nc作为备选"
+        # 使用nc作为备选方案
+        while true; do
+            # 创建临时文件存储响应
+            local response_file="/tmp/response_$$"
+            
+            # 读取请求并生成响应
+            {
+                # 读取请求行
+                if IFS= read -r request_line; then
+                    log_message "收到请求: $request_line"
+                    
+                    # 解析请求方法和路径
+                    local request_method=$(echo "$request_line" | awk '{print $1}')
+                    local request_path=$(echo "$request_line" | awk '{print $2}')
+                    [ -z "$request_path" ] && request_path="/"
+                    
+                    # 读取并忽略请求头
+                    local header_line
+                    while IFS= read -r header_line && [ -n "$header_line" ]; do
+                        # 移除\r字符
+                        header_line=$(echo "$header_line" | tr -d '\r')
+                        # 检查是否为空行（请求头结束）
+                        [ -z "$header_line" ] && break
+                    done
+                    
+                    # 处理请求并将响应写入文件
+                    handle_request "$request_method" "$request_path" "" > "$response_file"
+                fi
+            } | nc -l -p "$PORT" 2>/dev/null
+            
+            # 发送响应
+            if [ -f "$response_file" ]; then
+                cat "$response_file"
+                rm -f "$response_file"
             fi
-        } | $NC_CMD -l -p "$PORT" 2>/dev/null || true
-        
-        # 短暂休眠避免过高CPU使用率
-        sleep 0.1
-    done
+            
+            sleep 0.1
+        done
+    else
+        log_message "使用socat启动HTTP服务器"
+        while true; do
+            {
+                # 读取请求行
+                if IFS= read -r request_line; then
+                    log_message "收到请求: $request_line"
+                    
+                    # 解析请求方法和路径
+                    local request_method=$(echo "$request_line" | awk '{print $1}')
+                    local request_path=$(echo "$request_line" | awk '{print $2}')
+                    [ -z "$request_path" ] && request_path="/"
+                    
+                    # 读取并忽略请求头
+                    local header_line
+                    while IFS= read -r header_line && [ -n "$header_line" ]; do
+                        # 移除\r字符
+                        header_line=$(echo "$header_line" | tr -d '\r')
+                        # 检查是否为空行（请求头结束）
+                        [ -z "$header_line" ] && break
+                    done
+                    
+                    # 处理请求
+                    handle_request "$request_method" "$request_path" ""
+                fi
+            } | socat TCP-LISTEN:$PORT,reuseaddr,fork -
+            
+            sleep 0.1
+        done
+    fi
 }
 
 
@@ -479,7 +517,7 @@ EOF
         response+="Connection: close\r\n"
         response+="\r\n"
         response+="$api_info"
-        log_message "返回根路径响应"
+        log_message "返回根路径响应，长度: $content_length"
         echo -e "$response"
     elif [ "$request_path" = "/api/status" ]; then
         log_message "处理/api/status请求"
@@ -498,7 +536,7 @@ EOF
                 response+="Connection: close\r\n"
                 response+="\r\n"
                 response+="$file_content"
-                log_message "返回状态数据"
+                log_message "返回状态数据，长度: $content_length"
                 echo -e "$response"
             else
                 # 内容不是有效的JSON
@@ -513,7 +551,7 @@ EOF
                 response+="Connection: close\r\n"
                 response+="\r\n"
                 response+="$error_response"
-                log_message "返回状态数据格式错误"
+                log_message "返回状态数据格式错误，长度: $content_length"
                 echo -e "$response"
             fi
         else
@@ -543,7 +581,7 @@ EOF
             response+="Connection: close\r\n"
             response+="\r\n"
             response+="$content"
-            log_message "返回日志数据"
+            log_message "返回日志数据，长度: $content_length"
             echo -e "$response"
         else
             local response="HTTP/1.1 404 Not Found\r\n"
@@ -596,7 +634,7 @@ EOF
             response+="Connection: close\r\n"
             response+="\r\n"
             response+="$config_content"
-            log_message "返回配置数据"
+            log_message "返回配置数据，长度: $content_length"
             echo -e "$response"
         else
             local response="HTTP/1.1 404 Not Found\r\n"

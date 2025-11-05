@@ -290,20 +290,20 @@ start_http_server() {
                 if [ -f "/app/index.html" ]; then
                     content_length=$(stat -c %s /app/index.html)
                     echo -e "HTTP/1.1 200 OK\r"
-                    echo -e "Content-Type: text/html\r"
+                    echo -e "Content-Type: text/html; charset=utf-8\r"
                     echo -e "Content-Length: $content_length\r"
                     echo -e "\r"
                     cat /app/index.html
                 else
                     echo -e "HTTP/1.1 404 Not Found\r"
-                    echo -e "Content-Type: text/plain\r"
+                    echo -e "Content-Type: text/plain; charset=utf-8\r"
                     echo -e "\r"
                     echo "Web界面文件未找到"
                 fi
             elif [ "$request_path" = "/api/status" ]; then
                 # 返回JSON数据
                 echo -e "HTTP/1.1 200 OK\r"
-                echo -e "Content-Type: application/json\r"
+                echo -e "Content-Type: application/json; charset=utf-8\r"
                 echo -e "Access-Control-Allow-Origin: *\r"
                 echo -e "\r"
                 if [ -f "$STATUS_FILE" ]; then
@@ -314,7 +314,7 @@ start_http_server() {
             elif [ "$request_path" = "/api/log" ]; then
                 # 返回日志内容
                 echo -e "HTTP/1.1 200 OK\r"
-                echo -e "Content-Type: text/plain\r"
+                echo -e "Content-Type: text/plain; charset=utf-8\r"
                 echo -e "\r"
                 if [ -f "$LOG_FILE" ]; then
                     tail -n 50 "$LOG_FILE"
@@ -324,7 +324,7 @@ start_http_server() {
             elif [ "$request_path" = "/api/config" ] && [ "$request_method" = "GET" ]; then
                 # 返回当前配置
                 echo -e "HTTP/1.1 200 OK\r"
-                echo -e "Content-Type: application/json\r"
+                echo -e "Content-Type: application/json; charset=utf-8\r"
                 echo -e "\r"
                 if [ -f "$CONFIG_FILE" ]; then
                     cat "$CONFIG_FILE"
@@ -341,13 +341,13 @@ start_http_server() {
                 fi
                 
                 echo -e "HTTP/1.1 200 OK\r"
-                echo -e "Content-Type: application/json\r"
+                echo -e "Content-Type: application/json; charset=utf-8\r"
                 echo -e "\r"
                 echo '{"status": "success", "message": "配置更新成功，将在下次数据收集时生效"}'
             else
                 # 其他路径返回404
                 echo -e "HTTP/1.1 404 Not Found\r"
-                echo -e "Content-Type: text/plain\r"
+                echo -e "Content-Type: text/plain; charset=utf-8\r"
                 echo -e "\r"
                 echo "页面未找到"
             fi

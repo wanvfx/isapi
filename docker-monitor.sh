@@ -200,6 +200,89 @@ get_memory_info() {
         }'
 }
 
+# 获取温度信息
+get_temperature() {
+    # 尝试从不同的温度传感器文件读取数据
+    local temp_files=(
+        "/sys/class/thermal/thermal_zone*/temp"
+        "/sys/devices/virtual/thermal/thermal_zone*/temp"
+        "/sys/class/hwmon/hwmon*/temp1_input"
+    )
+    
+    for file in "${temp_files[@]}"; do
+        if [ -f "$file" ]; then
+            # 读取温度值（单位为毫摄氏度）
+            temp=$(cat "$file" 2>/dev/null)
+            if [ -n "$temp" ]; then
+                # 转换为摄氏度并返回JSON
+                celsius=$(echo "$temp" | awk '{print $1/1000}')
+                jq -n --argjson celsius "$celsius" '{celsius: $celsius}'
+                return 0
+            fi
+        fi
+    done
+    
+    # 如果没有找到温度传感器，返回null
+    jq -n 'null'
+}
+
+# 获取网络接口信息
+get_network_info() {
+    # 使用ip命令获取网络接口信息
+    if command -v ip >/dev/null 2>&1; then
+        # 获取所有活动的网络接口
+        interfaces=$(ip link show up | grep -o '^[0-9]*:' | cut -d':' -f1)
+        
+        # 初始化JSON数组
+        network_array="[]"
+        
+        # 遍历每个接口
+        for interface in $interfaces; do
+            # 获取接口名称
+            name=$(ip link show "$interface" | grep -o '^[^:]*:' | cut -d':' -f1)
+            
+            # 获取IP地址
+            ip_addr=$(ip addr show "$interface" | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1)
+            
+            # 获取流量统计
+            rx_bytes=$(cat /sys/class/net/$name/statistics/rx_bytes 2>/dev/null || echo "0")
+            tx_bytes=$(cat /sys/class/net/$name/statistics/tx_bytes 2>/dev/null || echo "0")
+            
+            # 构建接口信息
+            interface_json=$(jq -n \
+                --arg name "$name" \
+                --arg ip_addr "$ip_addr" \
+                --argjson rx_bytes "$rx_bytes" \
+                --argjson tx_bytes "$tx_bytes" \
+                '{
+                    name: $name,
+                    ip_address: $ip_addr,
+                    rx_bytes: $rx_bytes,
+                    tx_bytes: $tx_bytes
+                }')
+            
+            # 添加到数组
+            network_array=$(echo "$network_array" | jq --argjson interface "$interface_json" '. + [$interface]')
+        done
+        
+        echo "$network_array"
+    else
+        # 如果ip命令不可用，尝试使用ifconfig
+        if command -v ifconfig >/dev/null 2>&1; then
+            # 使用ifconfig获取网络接口信息
+            ifconfig | grep -A 5 "^[a-zA-Z]" | grep -E "(inet|RX packets|TX packets)" | awk '
+            /inet/ && !/127.0.0.1/ {ip = $2}
+            /RX packets/ {rx_packets = $2}
+            /TX packets/ {tx_packets = $2}
+            END {print "{\"name\": \""$1"\", \"ip_address\": \""ip"\", \"rx_packets\": "rx_packets", \"tx_packets\": "tx_packets"}"}
+            '
+        else
+            # 如果都没有可用，返回空数组
+            jq -n '[]'
+        fi
+    fi
+}
+
 # 获取磁盘信息
 get_disk_info() {
     # 获取根文件系统使用情况
@@ -328,20 +411,20 @@ start_http_server() {
                     if [ -f "/index.html" ]; then
                         content_length=$(stat -c %s /index.html)
                         echo -e "HTTP/1.1 200 OK\r"
-                        echo -e "Content-Type: text/html\r"
+                        echo -e "Content-Type: text/html; charset=utf-8\r"
                         echo -e "Content-Length: $content_length\r"
                         echo -e "\r"
                         cat /index.html
                     else
                         echo -e "HTTP/1.1 404 Not Found\r"
-                        echo -e "Content-Type: text/plain\r"
+                        echo -e "Content-Type: text/plain; charset=utf-8\r"
                         echo -e "\r"
                         echo "Web界面文件未找到"
                     fi
                 elif [ "$request_path" = "/api/status" ]; then
                     # 返回JSON数据
                     echo -e "HTTP/1.1 200 OK\r"
-                    echo -e "Content-Type: application/json\r"
+                    echo -e "Content-Type: application/json; charset=utf-8\r"
                     echo -e "Access-Control-Allow-Origin: *\r"
                     echo -e "\r"
                     if [ -f "$STATUS_FILE" ]; then
@@ -352,7 +435,7 @@ start_http_server() {
                 elif [ "$request_path" = "/api/log" ]; then
                     # 返回日志内容
                     echo -e "HTTP/1.1 200 OK\r"
-                    echo -e "Content-Type: text/plain\r"
+                    echo -e "Content-Type: text/plain; charset=utf-8\r"
                     echo -e "\r"
                     if [ -f "$LOG_FILE" ]; then
                         tail -n 50 "$LOG_FILE"
@@ -362,7 +445,7 @@ start_http_server() {
                 elif [ "$request_path" = "/api/config" ] && [ "$request_method" = "GET" ]; then
                     # 返回当前配置
                     echo -e "HTTP/1.1 200 OK\r"
-                    echo -e "Content-Type: application/json\r"
+                    echo -e "Content-Type: application/json; charset=utf-8\r"
                     echo -e "\r"
                     if [ -f "$CONFIG_FILE" ]; then
                         cat "$CONFIG_FILE"
@@ -379,13 +462,13 @@ start_http_server() {
                     fi
                     
                     echo -e "HTTP/1.1 200 OK\r"
-                    echo -e "Content-Type: application/json\r"
+                    echo -e "Content-Type: application/json; charset=utf-8\r"
                     echo -e "\r"
                     echo '{"status": "success", "message": "配置更新成功，将在下次数据收集时生效"}'
                 else
                     # 其他路径返回404
                     echo -e "HTTP/1.1 404 Not Found\r"
-                    echo -e "Content-Type: text/plain\r"
+                    echo -e "Content-Type: text/plain; charset=utf-8\r"
                     echo -e "\r"
                     echo "页面未找到"
                 fi

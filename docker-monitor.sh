@@ -437,34 +437,45 @@ handle_request() {
     local request_path=$2
     
     if [ "$request_path" = "/" ]; then
-        # 检查index.html是否存在（在容器中的/app目录）
-        html_file="/app/index.html"
-        if [ ! -f "$html_file" ]; then
-            # 尝试其他可能的路径
-            if [ -f "./index.html" ]; then
-                html_file="./index.html"
-            elif [ -f "/index.html" ]; then
-                html_file="/index.html"
-            fi
-        fi
-        
-        if [ -f "$html_file" ]; then
-            content_length=$(stat -c %s "$html_file" 2>/dev/null || echo "0")
-            response="HTTP/1.1 200 OK\r\n"
-            response+="Content-Type: text/html; charset=utf-8\r\n"
-            response+="Content-Length: $content_length\r\n"
-            response+="Connection: close\r\n"
-            response+="\r\n"
-            response+=$(cat "$html_file")
-            echo -e "$response"
-        else
-            response="HTTP/1.1 404 Not Found\r\n"
-            response+="Content-Type: text/plain; charset=utf-8\r\n"
-            response+="Connection: close\r\n"
-            response+="\r\n"
-            response+="Web界面文件未找到"
-            echo -e "$response"
-        fi
+        # 返回API说明信息
+        api_info=$(cat <<EOF
+{
+  "message": "ISAPI系统监控服务",
+  "description": "提供系统监控数据的API接口",
+  "api_endpoints": {
+    "get_status": {
+      "method": "GET",
+      "path": "/api/status",
+      "description": "获取系统状态信息"
+    },
+    "get_log": {
+      "method": "GET",
+      "path": "/api/log",
+      "description": "获取运行日志"
+    },
+    "get_config": {
+      "method": "GET",
+      "path": "/api/config",
+      "description": "获取当前配置"
+    },
+    "update_config": {
+      "method": "POST",
+      "path": "/api/config",
+      "description": "更新配置信息"
+    }
+  },
+  "usage": "请使用上述API端点获取系统监控数据"
+}
+EOF
+)
+        content_length=$(echo -n "$api_info" | wc -c)
+        response="HTTP/1.1 200 OK\r\n"
+        response+="Content-Type: application/json; charset=utf-8\r\n"
+        response+="Content-Length: $content_length\r\n"
+        response+="Connection: close\r\n"
+        response+="\r\n"
+        response+="$api_info"
+        echo -e "$response"
     elif [ "$request_path" = "/api/status" ]; then
         # 返回JSON数据
         if [ -f "$STATUS_FILE" ]; then
@@ -542,10 +553,10 @@ handle_request() {
     else
         # 其他路径返回404
         response="HTTP/1.1 404 Not Found\r\n"
-        response+="Content-Type: text/plain; charset=utf-8\r\n"
+        response+="Content-Type: application/json; charset=utf-8\r\n"
         response+="Connection: close\r\n"
         response+="\r\n"
-        response+="页面未找到"
+        response+='{"error": "Endpoint not found"}'
         echo -e "$response"
     fi
 }
@@ -562,6 +573,11 @@ handle_request() {
 
 # 启动HTTP服务器
 log_message "启动HTTP服务器，监听端口: ${PORT}"
+log_message "可用API接口:"
+log_message "  - 获取系统状态: http://localhost:${PORT}/api/status"
+log_message "  - 获取运行日志: http://localhost:${PORT}/api/log"
+log_message "  - 获取配置信息: http://localhost:${PORT}/api/config"
+log_message "  - 更新配置信息: POST http://localhost:${PORT}/api/config"
 
 # 使用while循环确保脚本持续运行
 while true; do

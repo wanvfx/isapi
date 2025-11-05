@@ -17,8 +17,6 @@ WORKDIR /app
 # 复制ISAPI监控脚本
 COPY docker-monitor.sh .
 
-# 复制Web界面文件
-COPY index.html .
 
 
 # 创建必要的目录

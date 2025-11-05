@@ -89,7 +89,7 @@ collect_system_info() {
     
     # 获取系统负载
     if [ "$ENABLE_LOAD_AVG" = "true" ]; then
-        load_avg=$(cat /proc/loadavg | awk '{print $1","$2","$3}')
+        load_avg=$(cat /proc/loadavg | awk '{print $1","$2","$3}' | tr -d '\r\n')
         system_builder=$(echo "$system_builder" | jq --arg load_avg "$load_avg" '. + {load_avg: $load_avg}')
     fi
     
@@ -163,11 +163,11 @@ get_cpu_usage() {
 # 获取内存信息
 get_memory_info() {
     # 从/proc/meminfo获取内存信息
-    mem_total=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-    mem_free=$(grep MemFree /proc/meminfo | awk '{print $2}')
-    mem_available=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
-    mem_buffers=$(grep Buffers /proc/meminfo | awk '{print $2}')
-    mem_cached=$(grep Cached /proc/meminfo | awk '{print $2}')
+    mem_total=$(grep MemTotal /proc/meminfo | awk '{print $2}' | tr -d '\r\n')
+    mem_free=$(grep MemFree /proc/meminfo | awk '{print $2}' | tr -d '\r\n')
+    mem_available=$(grep MemAvailable /proc/meminfo | awk '{print $2}' | tr -d '\r\n')
+    mem_buffers=$(grep Buffers /proc/meminfo | awk '{print $2}' | tr -d '\r\n')
+    mem_cached=$(grep Cached /proc/meminfo | awk '{print $2}' | grep -v SwapCached | head -1 | awk '{print $2}' | tr -d '\r\n')
     
     # 计算使用率
     mem_used=$((mem_total - mem_free))
@@ -200,12 +200,13 @@ get_temperature() {
     
     # 方法1: 从thermal_zone获取
     if [ -f "/sys/class/thermal/thermal_zone0/temp" ]; then
-        temp=$(cat /sys/class/thermal/thermal_zone0/temp | awk '{printf "%.1f", $1/1000}')
+        temp_raw=$(cat /sys/class/thermal/thermal_zone0/temp)
+        temp=$(echo $temp_raw | tr -d '\r\n' | awk '{printf "%.1f", $1/1000}')
     fi
     
     # 方法2: 使用sensors命令
     if command -v sensors >/dev/null 2>&1 && [ -z "$temp" ]; then
-        temp=$(sensors 2>/dev/null | grep -oE '[0-9]+\.[0-9]+°C' | head -1 | awk '{print $1}' | sed 's/°C//')
+        temp=$(sensors 2>/dev/null | grep -oE '[0-9]+\.[0-9]+°C' | head -1 | awk '{print $1}' | sed 's/°C//' | tr -d '\r\n')
     fi
     
     # 如果获取不到温度，设为null
@@ -230,8 +231,11 @@ get_network_info() {
     interface_array="[]"
     for interface in $interfaces; do
         if [ -f "/sys/class/net/$interface/statistics/rx_bytes" ] && [ -f "/sys/class/net/$interface/statistics/tx_bytes" ]; then
-            rx_bytes=$(cat /sys/class/net/$interface/statistics/rx_bytes)
-            tx_bytes=$(cat /sys/class/net/$interface/statistics/tx_bytes)
+            rx_bytes_raw=$(cat /sys/class/net/$interface/statistics/rx_bytes)
+            tx_bytes_raw=$(cat /sys/class/net/$interface/statistics/tx_bytes)
+            
+            rx_bytes=$(echo "$rx_bytes_raw" | tr -d '\r\n')
+            tx_bytes=$(echo "$tx_bytes_raw" | tr -d '\r\n')
             
             interface_info=$(jq -n \
                 --arg name "$interface" \
@@ -249,10 +253,10 @@ get_network_info() {
 # 获取磁盘信息
 get_disk_info() {
     # 获取根文件系统使用情况
-    disk_usage=$(df / 2>/dev/null | tail -1 | awk '{print "{\"total\": "$2", \"used\": "$3", \"available\": "$4", \"usage\": "$5"}"}')
+    disk_usage_raw=$(df / 2>/dev/null | tail -1 | awk '{print "{\"total\": "$2", \"used\": "$3", \"available\": "$4", \"usage\": \""$5"\"}"}')
     
-    if [ -n "$disk_usage" ]; then
-        echo "$disk_usage" | jq .
+    if [ -n "$disk_usage_raw" ]; then
+        echo "$disk_usage_raw" | tr -d '\r\n' | jq .
     else
         echo '{"total": 0, "used": 0, "available": 0, "usage": "0%"}'
     fi
@@ -266,9 +270,14 @@ start_http_server() {
             # 读取请求行
             read -r request_line
             # 读取请求头，直到遇到空行
-            while read -r header_line && [ -n "$header_line" ]; do
-                # 忽略请求头
-                :
+            # 处理Windows可能发送的CRLF换行符
+            while read -r header_line; do
+                # 移除可能的\r字符
+                header_line=$(echo "$header_line" | tr -d '\r')
+                # 检查是否为空行
+                if [ -z "$header_line" ]; then
+                    break
+                fi
             done
             
             # 解析请求路径和方法
@@ -350,9 +359,14 @@ start_http_server() {
                 # 读取请求行
                 read -r request_line
                 # 读取请求头，直到遇到空行
-                while read -r header_line && [ -n "$header_line" ]; do
-                    # 忽略请求头
-                    :
+                # 处理Windows可能发送的CRLF换行符
+                while read -r header_line; do
+                    # 移除可能的\r字符
+                    header_line=$(echo "$header_line" | tr -d '\r')
+                    # 检查是否为空行
+                    if [ -z "$header_line" ]; then
+                        break
+                    fi
                 done
                 
                 # 解析请求路径和方法

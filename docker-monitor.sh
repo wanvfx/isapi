@@ -319,6 +319,15 @@ start_http_server() {
             if [ "$request_path" = "/" ]; then
                 # 检查index.html是否存在（在容器中的/app目录）
                 html_file="/app/index.html"
+                if [ ! -f "$html_file" ]; then
+                    # 尝试其他可能的路径
+                    if [ -f "./index.html" ]; then
+                        html_file="./index.html"
+                    elif [ -f "/index.html" ]; then
+                        html_file="/index.html"
+                    fi
+                fi
+                
                 if [ -f "$html_file" ]; then
                     content_length=$(stat -c %s "$html_file")
                     echo -e "HTTP/1.1 200 OK\r"
@@ -330,7 +339,7 @@ start_http_server() {
                     echo -e "HTTP/1.1 404 Not Found\r"
                     echo -e "Content-Type: text/plain; charset=utf-8\r"
                     echo -e "\r"
-                    echo "Web界面文件未找到: $html_file"
+                    echo "Web界面文件未找到"
                 fi
             elif [ "$request_path" = "/api/status" ]; then
                 # 返回JSON数据
@@ -381,103 +390,10 @@ start_http_server() {
                 echo -e "HTTP/1.1 404 Not Found\r"
                 echo -e "Content-Type: text/plain; charset=utf-8\r"
                 echo -e "\r"
-                echo "页面未找到: $request_path"
+                echo "页面未找到"
             fi
         done
-    } | nc -l -p $PORT 2>/dev/null || {
-        # 如果nc不可用，使用bash实现简单的HTTP服务器
-        while true; do
-            {
-                # 读取请求行
-                read -r request_line
-                # 读取请求头，直到遇到空行
-                # 处理Windows可能发送的CRLF换行符
-                while read -r header_line; do
-                    # 移除可能的\r字符
-                    header_line=$(echo "$header_line" | tr -d '\r')
-                    # 检查是否为空行
-                    if [ -z "$header_line" ]; then
-                        break
-                    fi
-                done
-                
-                # 解析请求路径和方法
-                request_method=$(echo "$request_line" | awk '{print $1}')
-                request_path=$(echo "$request_line" | awk '{print $2}')
-                
-                # 确保请求路径存在，默认为根路径
-                [ -z "$request_path" ] && request_path="/"
-
-                if [ "$request_path" = "/" ]; then
-                    # 检查index.html是否存在（在容器中的/app目录）
-                    html_file="/app/index.html"
-                    if [ -f "$html_file" ]; then
-                        content_length=$(stat -c %s "$html_file")
-                        echo -e "HTTP/1.1 200 OK\r"
-                        echo -e "Content-Type: text/html; charset=utf-8\r"
-                        echo -e "Content-Length: $content_length\r"
-                        echo -e "\r"
-                        cat "$html_file"
-                    else
-                        echo -e "HTTP/1.1 404 Not Found\r"
-                        echo -e "Content-Type: text/plain; charset=utf-8\r"
-                        echo -e "\r"
-                        echo "Web界面文件未找到: $html_file"
-                    fi
-                elif [ "$request_path" = "/api/status" ]; then
-                    # 返回JSON数据
-                    echo -e "HTTP/1.1 200 OK\r"
-                    echo -e "Content-Type: application/json; charset=utf-8\r"
-                    echo -e "Access-Control-Allow-Origin: *\r"
-                    echo -e "\r"
-                    if [ -f "$STATUS_FILE" ]; then
-                        cat "$STATUS_FILE"
-                    else
-                        echo '{"error": "No data available"}'
-                    fi
-                elif [ "$request_path" = "/api/log" ]; then
-                    # 返回日志内容
-                    echo -e "HTTP/1.1 200 OK\r"
-                    echo -e "Content-Type: text/plain; charset=utf-8\r"
-                    echo -e "\r"
-                    if [ -f "$LOG_FILE" ]; then
-                        tail -n 50 "$LOG_FILE"
-                    else
-                        echo "暂无日志"
-                    fi
-                elif [ "$request_path" = "/api/config" ] && [ "$request_method" = "GET" ]; then
-                    # 返回当前配置
-                    echo -e "HTTP/1.1 200 OK\r"
-                    echo -e "Content-Type: application/json; charset=utf-8\r"
-                    echo -e "\r"
-                    if [ -f "$CONFIG_FILE" ]; then
-                        cat "$CONFIG_FILE"
-                    else
-                        echo '{"error": "Config file not found"}'
-                    fi
-                elif [ "$request_path" = "/api/config" ] && [ "$request_method" = "POST" ]; then
-                    # 处理配置更新请求
-                    # 读取POST数据
-                    content_length=$(echo "$header_line" | grep -i "content-length" | awk '{print $2}')
-                    if [ -n "$content_length" ]; then
-                        read -n "$content_length" post_data
-                        echo "$post_data" > "$CONFIG_FILE"
-                    fi
-                    
-                    echo -e "HTTP/1.1 200 OK\r"
-                    echo -e "Content-Type: application/json; charset=utf-8\r"
-                    echo -e "\r"
-                    echo '{"status": "success", "message": "配置更新成功，将在下次数据收集时生效"}'
-                else
-                    # 其他路径返回404
-                    echo -e "HTTP/1.1 404 Not Found\r"
-                    echo -e "Content-Type: text/plain; charset=utf-8\r"
-                    echo -e "\r"
-                    echo "页面未找到: $request_path"
-                fi
-            } | nc -l -p $PORT 2>/dev/null || sleep 1
-        done
-    }
+    } | nc -l -p $PORT 2>/dev/null || sleep 1
 }
 
 # 后台定期更新数据
@@ -492,8 +408,4 @@ start_http_server() {
 
 # 启动HTTP服务器
 log_message "启动HTTP服务器，监听端口: ${PORT}"
-# 直接在前台运行HTTP服务器，不使用函数包装
-while true; do
-    start_http_server
-    sleep 1
-done
+start_http_server

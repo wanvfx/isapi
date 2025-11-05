@@ -81,7 +81,10 @@ collect_system_info() {
     # 获取时间戳
     if [ "$ENABLE_TIMESTAMP" = "true" ]; then
         timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-        json_builder=$(echo "$json_builder" | jq --arg timestamp "$timestamp" '. + {timestamp: $timestamp}')
+        # 确保timestamp不为空
+        if [ -n "$timestamp" ]; then
+            json_builder=$(echo "$json_builder" | jq --arg timestamp "$timestamp" '. + {timestamp: $timestamp}')
+        fi
     fi
     
     # 初始化system对象
@@ -89,42 +92,72 @@ collect_system_info() {
     
     # 获取系统负载
     if [ "$ENABLE_LOAD_AVG" = "true" ]; then
-        load_avg=$(cat /proc/loadavg | awk '{print $1","$2","$3}' | tr -d '\r\n')
-        system_builder=$(echo "$system_builder" | jq --arg load_avg "$load_avg" '. + {load_avg: $load_avg}')
+        load_avg=$(cat /proc/loadavg 2>/dev/null | awk '{print $1","$2","$3}' | tr -d '\r\n')
+        # 确保load_avg不为空
+        if [ -n "$load_avg" ]; then
+            system_builder=$(echo "$system_builder" | jq --arg load_avg "$load_avg" '. + {load_avg: $load_avg}')
+        fi
     fi
     
     # 获取CPU使用率
     if [ "$ENABLE_CPU_USAGE" = "true" ]; then
-        cpu_usage=$(get_cpu_usage)
-        system_builder=$(echo "$system_builder" | jq --argjson cpu_usage "$cpu_usage" '. + {cpu_usage: $cpu_usage}')
+        cpu_usage=$(get_cpu_usage 2>/dev/null)
+        # 确保cpu_usage不为空且是有效的JSON
+        if [ -n "$cpu_usage" ]; then
+            if echo "$cpu_usage" | jq . >/dev/null 2>&1; then
+                system_builder=$(echo "$system_builder" | jq --argjson cpu_usage "$cpu_usage" '. + {cpu_usage: $cpu_usage}')
+            fi
+        fi
     fi
     
     # 获取内存信息
     if [ "$ENABLE_MEMORY_INFO" = "true" ]; then
-        mem_info=$(get_memory_info)
-        system_builder=$(echo "$system_builder" | jq --argjson mem_info "$mem_info" '. + {memory: $mem_info}')
+        mem_info=$(get_memory_info 2>/dev/null)
+        # 确保mem_info不为空且是有效的JSON
+        if [ -n "$mem_info" ]; then
+            if echo "$mem_info" | jq . >/dev/null 2>&1; then
+                system_builder=$(echo "$system_builder" | jq --argjson mem_info "$mem_info" '. + {memory: $mem_info}')
+            fi
+        fi
     fi
     
     # 获取温度信息
     if [ "$ENABLE_TEMPERATURE" = "true" ]; then
-        temperature=$(get_temperature)
-        system_builder=$(echo "$system_builder" | jq --argjson temperature "$temperature" '. + {temperature: $temperature}')
+        temperature=$(get_temperature 2>/dev/null)
+        # 确保temperature不为空且是有效的JSON
+        if [ -n "$temperature" ]; then
+            if echo "$temperature" | jq . >/dev/null 2>&1; then
+                system_builder=$(echo "$system_builder" | jq --argjson temperature "$temperature" '. + {temperature: $temperature}')
+            fi
+        fi
     fi
     
     # 获取网络接口信息
     if [ "$ENABLE_NETWORK_INFO" = "true" ]; then
-        network_info=$(get_network_info)
-        system_builder=$(echo "$system_builder" | jq --argjson network_info "$network_info" '. + {network: $network_info}')
+        network_info=$(get_network_info 2>/dev/null)
+        # 确保network_info不为空且是有效的JSON数组
+        if [ -n "$network_info" ]; then
+            if echo "$network_info" | jq . >/dev/null 2>&1; then
+                system_builder=$(echo "$system_builder" | jq --argjson network_info "$network_info" '. + {network: $network_info}')
+            fi
+        fi
     fi
     
     # 获取磁盘使用情况
     if [ "$ENABLE_DISK_INFO" = "true" ]; then
-        disk_info=$(get_disk_info)
-        system_builder=$(echo "$system_builder" | jq --argjson disk_info "$disk_info" '. + {disk: $disk_info}')
+        disk_info=$(get_disk_info 2>/dev/null)
+        # 确保disk_info不为空且是有效的JSON
+        if [ -n "$disk_info" ]; then
+            if echo "$disk_info" | jq . >/dev/null 2>&1; then
+                system_builder=$(echo "$system_builder" | jq --argjson disk_info "$disk_info" '. + {disk: $disk_info}')
+            fi
+        fi
     fi
     
     # 将system对象添加到主JSON对象
-    json_builder=$(echo "$json_builder" | jq --argjson system "$system_builder" '. + {system: $system}')
+    if [ "$system_builder" != "{}" ]; then
+        json_builder=$(echo "$json_builder" | jq --argjson system "$system_builder" '. + {system: $system}')
+    fi
     
     # 写入状态文件
     echo "$json_builder" > "$STATUS_FILE"
@@ -133,41 +166,63 @@ collect_system_info() {
 # 获取CPU使用率
 get_cpu_usage() {
     # 读取第一次CPU状态
-    cpu_line=$(head -n1 /proc/stat)
+    cpu_line=$(head -n1 /proc/stat 2>/dev/null)
+    if [ -z "$cpu_line" ]; then
+        # 返回默认值
+        jq -n '{usage: 0}'
+        return
+    fi
+    
     cpu_now=($(echo $cpu_line | awk '{print $2,$3,$4,$5,$6,$7,$8}'))
     
     # 计算总时间和空闲时间
-    idle_now=${cpu_now[3]}
-    total_now=$((${cpu_now[0]} + ${cpu_now[1]} + ${cpu_now[2]} + ${cpu_now[3]} + ${cpu_now[4]} + ${cpu_now[5]} + ${cpu_now[6]}))
+    idle_now=${cpu_now[3]:-0}
+    total_now=$((${cpu_now[0]:-0} + ${cpu_now[1]:-0} + ${cpu_now[2]:-0} + ${cpu_now[3]:-0} + ${cpu_now[4]:-0} + ${cpu_now[5]:-0} + ${cpu_now[6]:-0}))
     
     # 等待一段时间
     sleep 0.5
     
     # 读取第二次CPU状态
-    cpu_line=$(head -n1 /proc/stat)
+    cpu_line=$(head -n1 /proc/stat 2>/dev/null)
+    if [ -z "$cpu_line" ]; then
+        # 返回默认值
+        jq -n '{usage: 0}'
+        return
+    fi
+    
     cpu_next=($(echo $cpu_line | awk '{print $2,$3,$4,$5,$6,$7,$8}'))
     
     # 计算总时间和空闲时间
-    idle_next=${cpu_next[3]}
-    total_next=$((${cpu_next[0]} + ${cpu_next[1]} + ${cpu_next[2]} + ${cpu_next[3]} + ${cpu_next[4]} + ${cpu_next[5]} + ${cpu_next[6]}))
+    idle_next=${cpu_next[3]:-0}
+    total_next=$((${cpu_next[0]:-0} + ${cpu_next[1]:-0} + ${cpu_next[2]:-0} + ${cpu_next[3]:-0} + ${cpu_next[4]:-0} + ${cpu_next[5]:-0} + ${cpu_next[6]:-0}))
     
     # 计算使用率
     idle_diff=$((idle_next - idle_now))
     total_diff=$((total_next - total_now))
-    cpu_usage=$((100 * (total_diff - idle_diff) / total_diff))
+    
+    if [ $total_diff -gt 0 ]; then
+        cpu_usage=$((100 * (total_diff - idle_diff) / total_diff))
+    else
+        cpu_usage=0
+    fi
+    
+    # 确保cpu_usage在合理范围内
+    if [ $cpu_usage -lt 0 ] || [ $cpu_usage -gt 100 ]; then
+        cpu_usage=0
+    fi
     
     # 返回JSON
-    jq -n --arg usage "$cpu_usage" '{usage: $usage}'
+    jq -n --arg usage "$cpu_usage" '{usage: ($usage | tonumber)}'
 }
 
 # 获取内存信息
 get_memory_info() {
     # 从/proc/meminfo获取内存信息
-    mem_total=$(grep MemTotal /proc/meminfo | awk '{print $2}' | tr -d '\r\n')
-    mem_free=$(grep MemFree /proc/meminfo | awk '{print $2}' | tr -d '\r\n')
-    mem_available=$(grep MemAvailable /proc/meminfo | awk '{print $2}' | tr -d '\r\n')
-    mem_buffers=$(grep Buffers /proc/meminfo | awk '{print $2}' | tr -d '\r\n')
-    mem_cached=$(grep Cached /proc/meminfo | awk '{print $2}' | grep -v SwapCached | head -1 | awk '{print $2}' | tr -d '\r\n')
+    mem_total=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}' | tr -d '\r\n')
+    mem_free=$(grep MemFree /proc/meminfo 2>/dev/null | awk '{print $2}' | tr -d '\r\n')
+    mem_available=$(grep MemAvailable /proc/meminfo 2>/dev/null | awk '{print $2}' | tr -d '\r\n')
+    mem_buffers=$(grep Buffers /proc/meminfo 2>/dev/null | awk '{print $2}' | tr -d '\r\n')
+    mem_cached=$(grep Cached /proc/meminfo 2>/dev/null | awk '{print $2}' | grep -v SwapCached | head -1 | awk '{print $2}' | tr -d '\r\n')
 
     # 如果任何字段为空，则设置为0
     [ -z "$mem_total" ] && mem_total=0
@@ -176,9 +231,14 @@ get_memory_info() {
     [ -z "$mem_buffers" ] && mem_buffers=0
     [ -z "$mem_cached" ] && mem_cached=0
 
-    # 计算使用率
-    mem_used=$((mem_total - mem_free))
-    mem_usage=$((100 * mem_used / mem_total))
+    # 计算使用率，避免除以零
+    if [ "$mem_total" -gt 0 ]; then
+        mem_used=$((mem_total - mem_free))
+        mem_usage=$((100 * mem_used / mem_total))
+    else
+        mem_used=0
+        mem_usage=0
+    fi
 
     # 返回JSON
     jq -n \
@@ -207,8 +267,10 @@ get_temperature() {
     
     # 方法1: 从thermal_zone获取
     if [ -f "/sys/class/thermal/thermal_zone0/temp" ]; then
-        temp_raw=$(cat /sys/class/thermal/thermal_zone0/temp)
-        temp=$(echo $temp_raw | tr -d '\r\n' | awk '{printf "%.1f", $1/1000}')
+        temp_raw=$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null)
+        if [ -n "$temp_raw" ]; then
+            temp=$(echo $temp_raw | tr -d '\r\n' | awk '{printf "%.1f", $1/1000}')
+        fi
     fi
     
     # 方法2: 使用sensors命令
@@ -225,7 +287,12 @@ get_temperature() {
     if [ "$temp" = "null" ]; then
         echo '{"celsius": null}'
     else
-        jq -n --arg temp "$temp" '{celsius: ($temp | tonumber)}'
+        # 确保temp是有效数字
+        if echo "$temp" | grep -qE '^-?[0-9]+\.?[0-9]*$'; then
+            jq -n --arg temp "$temp" '{celsius: ($temp | tonumber)}'
+        else
+            echo '{"celsius": null}'
+        fi
     fi
 }
 
@@ -236,7 +303,7 @@ get_network_info() {
     
     # 如果没有找到接口，尝试使用ip命令
     if [ -z "$interfaces" ]; then
-        interfaces=$(ip -o link show | awk -F': ' '{print $2}' | head -5)
+        interfaces=$(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | head -5)
     fi
     
     # 构建接口信息数组
@@ -264,6 +331,10 @@ get_network_info() {
             [ -z "$tx_bytes" ] && tx_bytes=0
         fi
         
+        # 确保数值有效
+        [ -z "$rx_bytes" ] && rx_bytes=0
+        [ -z "$tx_bytes" ] && tx_bytes=0
+        
         interface_info=$(jq -n \
             --arg name "$interface" \
             --arg rx_bytes "$rx_bytes" \
@@ -284,7 +355,12 @@ get_disk_info() {
     if [ -n "$disk_usage_raw" ]; then
         # 移除可能的\r字符
         disk_usage_raw=$(echo "$disk_usage_raw" | tr -d '\r\n')
-        echo "$disk_usage_raw" | jq .
+        if echo "$disk_usage_raw" | jq . >/dev/null 2>&1; then
+            echo "$disk_usage_raw"
+        else
+            # 如果解析失败，返回默认值
+            echo '{"total": 0, "used": 0, "available": 0, "usage": "0%"}'
+        fi
     else
         # 如果df命令失败，返回默认值
         echo '{"total": 0, "used": 0, "available": 0, "usage": "0%"}'

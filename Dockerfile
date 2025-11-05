@@ -9,7 +9,8 @@ RUN apk add --no-cache \
     procps \
     lm-sensors \
     iproute2 \
-    util-linux
+    util-linux \
+    netcat-openbsd
 
 # 创建工作目录
 WORKDIR /app
@@ -17,16 +18,11 @@ WORKDIR /app
 # 复制ISAPI监控脚本
 COPY docker-monitor.sh .
 
-
-
-# 创建必要的目录
-RUN mkdir -p /tmp/wechatpush
-
-# 设置权限
-RUN chmod +x ./docker-monitor.sh
+# 设置脚本可执行权限
+RUN chmod +x docker-monitor.sh
 
 # 暴露端口
 EXPOSE 15130
 
-# 启动监控服务
+# 启动服务
 CMD ["./docker-monitor.sh"]

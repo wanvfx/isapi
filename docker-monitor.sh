@@ -22,6 +22,7 @@ DEFAULT_CONFIG='{
 init_config() {
     if [ ! -f "$CONFIG_FILE" ]; then
         echo "$DEFAULT_CONFIG" > "$CONFIG_FILE"
+        log_message "配置文件已初始化"
     fi
 }
 
@@ -29,8 +30,16 @@ init_config() {
 get_config_value() {
     local key=$1
     local default_value=$2
+    if [ ! -f "$CONFIG_FILE" ]; then
+        echo "$default_value"
+        return
+    fi
     local value=$(jq -r --arg key "$key" '.[$key] // $default_value' "$CONFIG_FILE" 2>/dev/null)
-    echo "$value"
+    if [ -z "$value" ]; then
+        echo "$default_value"
+    else
+        echo "$value"
+    fi
 }
 
 # 记录日志
@@ -215,7 +224,7 @@ start_http_server() {
             local header_line
 
             # 读取所有请求头
-            while IFS= read -r header_line; do
+            while IFS= read -r header_line && [ -n "$header_line" ]; do
                 # 移除可能的 \r 字符
                 header_line=$(echo "$header_line" | tr -d '\r')
                 # 检查是否为空行（请求头结束）
@@ -293,7 +302,7 @@ EOF
         echo -e "$response"
     elif [ "$request_path" = "/api/status" ]; then
         # 返回JSON数据
-        if [ -f "$STATUS_FILE" ]; then
+        if [ -f "$STATUS_FILE" ] && [ -s "$STATUS_FILE" ]; then
             local file_content=$(cat "$STATUS_FILE")
             local content_length=$(echo -n "$file_content" | wc -c)
             local response="HTTP/1.1 200 OK\r\n"
@@ -354,9 +363,13 @@ EOF
         fi
     elif [ "$request_path" = "/api/config" ] && [ "$request_method" = "POST" ]; then
         # 处理配置更新请求
+        local post_data=""
         if [ -n "$content_length_header" ] && [ "$content_length_header" -gt 0 ]; then
-            local post_data
+            # 读取POST数据
             read -n "$content_length_header" post_data
+        fi
+        
+        if [ -n "$post_data" ]; then
             echo "$post_data" > "$CONFIG_FILE"
             log_message "配置已更新"
         fi
@@ -401,6 +414,9 @@ main() {
             sleep "$REFRESH_INTERVAL"
         done
     } &
+
+    # 等待第一次数据收集完成
+    sleep 1
 
     # 启动HTTP服务器
     start_http_server

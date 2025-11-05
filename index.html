@@ -105,98 +105,115 @@
     <div class="container">
         <header>
             <h1>ISAPI系统监控</h1>
+            <p>实时监控软路由系统状态</p>
         </header>
 
         <div class="dashboard">
             <div class="card">
                 <h3>系统状态</h3>
-                <p><span class="status-indicator status-running"></span> 运行中</p>
-                <div id="systemInfo"></div>
+                <div id="systemInfo">
+                    <p>正在加载系统信息...</p>
+                </div>
             </div>
 
             <div class="card">
                 <h3>配置参数</h3>
                 <form id="configForm">
                     <div class="form-group">
-                        <label for="port">端口:</label>
-                        <input type="number" id="port" name="port" value="15130" min="1" max="65535">
+                        <label for="port">端口</label>
+                        <input type="number" id="port" value="15130" min="1" max="65535">
                     </div>
+
                     <div class="form-group">
-                        <label for="refreshInterval">刷新间隔 (秒):</label>
-                        <input type="number" id="refreshInterval" name="refreshInterval" value="5" min="1" max="3600">
+                        <label for="refreshInterval">刷新间隔（秒）</label>
+                        <input type="number" id="refreshInterval" value="5" min="1" max="3600">
                     </div>
-                    <h4>监控项设置</h4>
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="enableTimestamp" name="enableTimestamp" checked>
-                        <label for="enableTimestamp">获取时间戳</label>
+
+                    <div class="form-group">
+                        <label>监控项配置</label>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="enableTimestamp" checked>
+                            <label for="enableTimestamp">获取时间戳</label>
+                        </div>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="enableLoadAvg" checked>
+                            <label for="enableLoadAvg">获取系统负载</label>
+                        </div>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="enableCpuUsage" checked>
+                            <label for="enableCpuUsage">获取CPU使用率</label>
+                        </div>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="enableMemoryInfo" checked>
+                            <label for="enableMemoryInfo">获取内存信息</label>
+                        </div>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="enableTemperature" checked>
+                            <label for="enableTemperature">获取温度信息</label>
+                        </div>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="enableNetworkInfo" checked>
+                            <label for="enableNetworkInfo">获取网络接口信息</label>
+                        </div>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="enableDiskInfo" checked>
+                            <label for="enableDiskInfo">获取磁盘使用情况</label>
+                        </div>
                     </div>
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="enableLoadAvg" name="enableLoadAvg" checked>
-                        <label for="enableLoadAvg">获取系统负载</label>
-                    </div>
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="enableCpuUsage" name="enableCpuUsage" checked>
-                        <label for="enableCpuUsage">获取CPU使用率</label>
-                    </div>
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="enableMemoryInfo" name="enableMemoryInfo" checked>
-                        <label for="enableMemoryInfo">获取内存信息</label>
-                    </div>
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="enableTemperature" name="enableTemperature" checked>
-                        <label for="enableTemperature">获取温度信息</label>
-                    </div>
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="enableNetworkInfo" name="enableNetworkInfo" checked>
-                        <label for="enableNetworkInfo">获取网络接口信息</label>
-                    </div>
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="enableDiskInfo" name="enableDiskInfo" checked>
-                        <label for="enableDiskInfo">获取磁盘使用情况</label>
-                    </div>
+
                     <button type="submit">保存配置</button>
-                    <button type="button" id="resetConfig">重置为默认</button>
+                    <button type="button" id="resetConfig">重置为默认配置</button>
                 </form>
             </div>
         </div>
 
         <div class="card">
             <h3>运行日志</h3>
-            <div id="logContainer">[系统] 监控服务已启动...</div>
-            <button id="clearLog" style="margin-top: 10px;">清空日志</button>
-            <button id="refreshLog" style="margin-top: 10px;">刷新日志</button>
+            <div id="logContainer"></div>
+            <div style="margin-top: 10px;">
+                <button id="refreshLog">刷新日志</button>
+                <button id="clearLog">清空日志</button>
+            </div>
         </div>
     </div>
 
     <script>
-        // 当前配置
-        let currentConfig = {};
-        
-        // 页面加载时获取当前配置
-        window.addEventListener('load', function() {
-            fetchConfig();
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            // 加载配置
+            loadConfig();
+            
+            // 更新系统信息
             updateSystemInfo();
+            
+            // 获取日志
             fetchLog();
-            setInterval(updateSystemInfo, 5000); // 每5秒更新一次
-            setInterval(fetchLog, 3000); // 每3秒刷新一次日志
+            
+            // 每5秒更新一次系统信息
+            setInterval(updateSystemInfo, 5000);
+            
+            // 每30秒更新一次日志
+            setInterval(fetchLog, 30000);
+            
+            addLog('ISAPI系统监控已启动');
         });
-        
-        // 获取当前配置
-        function fetchConfig() {
+
+        // 加载配置
+        function loadConfig() {
             fetch('/api/config')
                 .then(response => response.json())
                 .then(config => {
-                    currentConfig = config;
-                    document.getElementById('enableTimestamp').checked = config.enable_timestamp === 'true';
-                    document.getElementById('enableLoadAvg').checked = config.enable_load_avg === 'true';
-                    document.getElementById('enableCpuUsage').checked = config.enable_cpu_usage === 'true';
-                    document.getElementById('enableMemoryInfo').checked = config.enable_memory_info === 'true';
-                    document.getElementById('enableTemperature').checked = config.enable_temperature === 'true';
-                    document.getElementById('enableNetworkInfo').checked = config.enable_network_info === 'true';
-                    document.getElementById('enableDiskInfo').checked = config.enable_disk_info === 'true';
+                    document.getElementById('enableTimestamp').checked = config.enable_timestamp !== 'false';
+                    document.getElementById('enableLoadAvg').checked = config.enable_load_avg !== 'false';
+                    document.getElementById('enableCpuUsage').checked = config.enable_cpu_usage !== 'false';
+                    document.getElementById('enableMemoryInfo').checked = config.enable_memory_info !== 'false';
+                    document.getElementById('enableTemperature').checked = config.enable_temperature !== 'false';
+                    document.getElementById('enableNetworkInfo').checked = config.enable_network_info !== 'false';
+                    document.getElementById('enableDiskInfo').checked = config.enable_disk_info !== 'false';
                 })
                 .catch(error => {
-                    console.error('获取配置失败:', error);
+                    console.error('加载配置失败:', error);
+                    addLog(`加载配置失败: ${error.message}`);
                 });
         }
 
@@ -209,42 +226,50 @@
                     let infoHtml = '';
                     
                     // 显示所有监控项的状态
-                    infoHtml += `<p><strong>获取时间戳:</strong> ${data.timestamp || '未启用'}</p>`;
+                    if (data.timestamp) {
+                        infoHtml += `<p><strong>获取时间戳:</strong> ${data.timestamp}</p>`;
+                    } else {
+                        infoHtml += `<p><strong>获取时间戳:</strong> 未启用</p>`;
+                    }
                     
                     if (data.system) {
-                        infoHtml += `<p><strong>获取系统负载:</strong> ${data.system.load_avg || '未启用'}</p>`;
-                        if (data.system.cpu_usage) {
-                            infoHtml += `<p><strong>获取CPU使用率:</strong> ${data.system.cpu_usage.usage || 'N/A'}%</p>`;
+                        if (data.system.load_avg) {
+                            infoHtml += `<p><strong>获取系统负载:</strong> ${data.system.load_avg}</p>`;
+                        } else {
+                            infoHtml += `<p><strong>获取系统负载:</strong> 未启用</p>`;
+                        }
+                        
+                        if (data.system.cpu_usage && data.system.cpu_usage.usage !== undefined) {
+                            infoHtml += `<p><strong>获取CPU使用率:</strong> ${data.system.cpu_usage.usage}%</p>`;
                         } else {
                             infoHtml += `<p><strong>获取CPU使用率:</strong> 未启用</p>`;
                         }
-                        if (data.system.memory) {
-                            infoHtml += `<p><strong>获取内存信息:</strong> ${data.system.memory.usage || 'N/A'}%</p>`;
+                        
+                        if (data.system.memory && data.system.memory.usage !== undefined) {
+                            infoHtml += `<p><strong>获取内存信息:</strong> ${data.system.memory.usage}%</p>`;
                         } else {
                             infoHtml += `<p><strong>获取内存信息:</strong> 未启用</p>`;
                         }
-                        if (data.system.temperature) {
-                            infoHtml += `<p><strong>获取温度信息:</strong> ${data.system.temperature.celsius !== null ? data.system.temperature.celsius + '°C' : '未检测到'}</p>`;
+                        
+                        if (data.system.temperature && data.system.temperature.celsius !== null) {
+                            infoHtml += `<p><strong>获取温度信息:</strong> ${data.system.temperature.celsius}°C</p>`;
                         } else {
-                            infoHtml += `<p><strong>获取温度信息:</strong> 未启用</p>`;
+                            infoHtml += `<p><strong>获取温度信息:</strong> 未启用或未检测到</p>`;
                         }
-                        if (data.system.network) {
-                            infoHtml += `<p><strong>获取网络接口信息:</strong> ${data.system.network.length || 0}个接口</p>`;
+                        
+                        if (data.system.network && Array.isArray(data.system.network)) {
+                            infoHtml += `<p><strong>获取网络接口信息:</strong> ${data.system.network.length}个接口</p>`;
                         } else {
                             infoHtml += `<p><strong>获取网络接口信息:</strong> 未启用</p>`;
                         }
-                        if (data.system.disk) {
-                            infoHtml += `<p><strong>获取磁盘使用情况:</strong> ${data.system.disk.usage || 'N/A'}</p>`;
+                        
+                        if (data.system.disk && data.system.disk.usage) {
+                            infoHtml += `<p><strong>获取磁盘使用情况:</strong> ${data.system.disk.usage}</p>`;
                         } else {
                             infoHtml += `<p><strong>获取磁盘使用情况:</strong> 未启用</p>`;
                         }
                     } else {
-                        infoHtml += `<p><strong>获取系统负载:</strong> 未启用</p>`;
-                        infoHtml += `<p><strong>获取CPU使用率:</strong> 未启用</p>`;
-                        infoHtml += `<p><strong>获取内存信息:</strong> 未启用</p>`;
-                        infoHtml += `<p><strong>获取温度信息:</strong> 未启用</p>`;
-                        infoHtml += `<p><strong>获取网络接口信息:</strong> 未启用</p>`;
-                        infoHtml += `<p><strong>获取磁盘使用情况:</strong> 未启用</p>`;
+                        infoHtml += `<p><strong>系统信息:</strong> 暂无数据</p>`;
                     }
                     
                     systemInfo.innerHTML = infoHtml;

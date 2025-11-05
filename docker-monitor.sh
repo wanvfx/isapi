@@ -52,13 +52,13 @@ fi
 # 读取配置文件
 read_config() {
     if [ -f "$CONFIG_FILE" ]; then
-        ENABLE_TIMESTAMP=$(jq -r '.enable_timestamp' "$CONFIG_FILE")
-        ENABLE_LOAD_AVG=$(jq -r '.enable_load_avg' "$CONFIG_FILE")
-        ENABLE_CPU_USAGE=$(jq -r '.enable_cpu_usage' "$CONFIG_FILE")
-        ENABLE_MEMORY_INFO=$(jq -r '.enable_memory_info' "$CONFIG_FILE")
-        ENABLE_TEMPERATURE=$(jq -r '.enable_temperature' "$CONFIG_FILE")
-        ENABLE_NETWORK_INFO=$(jq -r '.enable_network_info' "$CONFIG_FILE")
-        ENABLE_DISK_INFO=$(jq -r '.enable_disk_info' "$CONFIG_FILE")
+        ENABLE_TIMESTAMP=$(jq -r '.enable_timestamp // "true"' "$CONFIG_FILE")
+        ENABLE_LOAD_AVG=$(jq -r '.enable_load_avg // "true"' "$CONFIG_FILE")
+        ENABLE_CPU_USAGE=$(jq -r '.enable_cpu_usage // "true"' "$CONFIG_FILE")
+        ENABLE_MEMORY_INFO=$(jq -r '.enable_memory_info // "true"' "$CONFIG_FILE")
+        ENABLE_TEMPERATURE=$(jq -r '.enable_temperature // "true"' "$CONFIG_FILE")
+        ENABLE_NETWORK_INFO=$(jq -r '.enable_network_info // "true"' "$CONFIG_FILE")
+        ENABLE_DISK_INFO=$(jq -r '.enable_disk_info // "true"' "$CONFIG_FILE")
     fi
 }
 
@@ -267,24 +267,25 @@ get_temperature() {
     
     # 方法1: 从thermal_zone获取
     if [ -f "/sys/class/thermal/thermal_zone0/temp" ]; then
-        temp_raw=$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null)
+        temp_raw=$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null | tr -d '\r\n')
         if [ -n "$temp_raw" ]; then
-            temp=$(echo $temp_raw | tr -d '\r\n' | awk '{printf "%.1f", $1/1000}')
+            # 确保temp_raw是数字
+            if echo "$temp_raw" | grep -qE '^-?[0-9]+$'; then
+                temp=$(echo "$temp_raw" | awk '{printf "%.1f", $1/1000}')
+            fi
         fi
     fi
     
     # 方法2: 使用sensors命令
     if command -v sensors >/dev/null 2>&1 && [ -z "$temp" ]; then
-        temp=$(sensors 2>/dev/null | grep -oE '[0-9]+\.[0-9]+°C' | head -1 | awk '{print $1}' | sed 's/°C//' | tr -d '\r\n')
+        temp_raw=$(sensors 2>/dev/null | grep -oE '[0-9]+\.[0-9]+°C' | head -1 | awk '{print $1}' | sed 's/°C//' | tr -d '\r\n')
+        if [ -n "$temp_raw" ]; then
+            temp="$temp_raw"
+        fi
     fi
     
     # 如果获取不到温度，设为null
     if [ -z "$temp" ]; then
-        temp="null"
-    fi
-    
-    # 返回JSON
-    if [ "$temp" = "null" ]; then
         echo '{"celsius": null}'
     else
         # 确保temp是有效数字
@@ -303,7 +304,7 @@ get_network_info() {
     
     # 如果没有找到接口，尝试使用ip命令
     if [ -z "$interfaces" ]; then
-        interfaces=$(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | head -5)
+        interfaces=$(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | head -5 | tr -d '\r\n')
     fi
     
     # 构建接口信息数组
@@ -319,16 +320,17 @@ get_network_info() {
         
         # 尝试从sysfs获取流量统计
         if [ -f "/sys/class/net/$interface/statistics/rx_bytes" ] && [ -f "/sys/class/net/$interface/statistics/tx_bytes" ]; then
-            rx_bytes_raw=$(cat /sys/class/net/$interface/statistics/rx_bytes 2>/dev/null)
-            tx_bytes_raw=$(cat /sys/class/net/$interface/statistics/tx_bytes 2>/dev/null)
+            rx_bytes_raw=$(cat /sys/class/net/$interface/statistics/rx_bytes 2>/dev/null | tr -d '\r\n')
+            tx_bytes_raw=$(cat /sys/class/net/$interface/statistics/tx_bytes 2>/dev/null | tr -d '\r\n')
             
-            # 清理数据
-            rx_bytes=$(echo "$rx_bytes_raw" | tr -d '\r\n')
-            tx_bytes=$(echo "$tx_bytes_raw" | tr -d '\r\n')
+            # 清理数据，确保是数字
+            if echo "$rx_bytes_raw" | grep -qE '^[0-9]+$'; then
+                rx_bytes="$rx_bytes_raw"
+            fi
             
-            # 如果读取失败，设为0
-            [ -z "$rx_bytes" ] && rx_bytes=0
-            [ -z "$tx_bytes" ] && tx_bytes=0
+            if echo "$tx_bytes_raw" | grep -qE '^[0-9]+$'; then
+                tx_bytes="$tx_bytes_raw"
+            fi
         fi
         
         # 确保数值有效
@@ -350,17 +352,33 @@ get_network_info() {
 # 获取磁盘信息
 get_disk_info() {
     # 获取根文件系统使用情况
-    disk_usage_raw=$(df / 2>/dev/null | tail -1 | awk '{print "{\"total\": "$2", \"used\": "$3", \"available\": "$4", \"usage\": \""$5"\"}"}')
-
-    if [ -n "$disk_usage_raw" ]; then
-        # 移除可能的\r字符
-        disk_usage_raw=$(echo "$disk_usage_raw" | tr -d '\r\n')
-        if echo "$disk_usage_raw" | jq . >/dev/null 2>&1; then
-            echo "$disk_usage_raw"
-        else
-            # 如果解析失败，返回默认值
-            echo '{"total": 0, "used": 0, "available": 0, "usage": "0%"}'
-        fi
+    df_output=$(df / 2>/dev/null | tail -1 | tr -d '\r\n')
+    
+    if [ -n "$df_output" ]; then
+        # 解析df输出
+        total=$(echo "$df_output" | awk '{print $2}' | tr -d '\r\n')
+        used=$(echo "$df_output" | awk '{print $3}' | tr -d '\r\n')
+        available=$(echo "$df_output" | awk '{print $4}' | tr -d '\r\n')
+        usage_percent=$(echo "$df_output" | awk '{print $5}' | tr -d '\r\n')
+        
+        # 确保数值有效
+        [ -z "$total" ] && total=0
+        [ -z "$used" ] && used=0
+        [ -z "$available" ] && available=0
+        [ -z "$usage_percent" ] && usage_percent="0%"
+        
+        # 返回JSON
+        jq -n \
+            --arg total "$total" \
+            --arg used "$used" \
+            --arg available "$available" \
+            --arg usage "$usage_percent" \
+            '{
+                total: ($total | tonumber),
+                used: ($used | tonumber),
+                available: ($available | tonumber),
+                usage: $usage
+            }'
     else
         # 如果df命令失败，返回默认值
         echo '{"total": 0, "used": 0, "available": 0, "usage": "0%"}'
@@ -370,8 +388,9 @@ get_disk_info() {
 # 启动HTTP服务器
 start_http_server() {
     # 使用ncat或简单的bash TCP服务器
-    {
-        while true; do
+    while true; do
+        # 读取请求并处理
+        {
             # 读取请求行
             read -r request_line
             # 读取请求头，直到遇到空行
@@ -386,90 +405,110 @@ start_http_server() {
             done
             
             # 解析请求路径和方法
-            request_method=$(echo "$request_line" | awk '{print $1}')
-            request_path=$(echo "$request_line" | awk '{print $2}')
+            request_method=$(echo "$request_line" | awk '{print $1}' | tr -d '\r\n')
+            request_path=$(echo "$request_line" | awk '{print $2}' | tr -d '\r\n')
             
             # 确保请求路径存在，默认为根路径
             [ -z "$request_path" ] && request_path="/"
+            
+            # 处理不同的请求路径
+            handle_request "$request_method" "$request_path"
+        } | {
+            # 确保只发送一次响应
+            response_sent=false
+            
+            # 读取处理结果并发送响应
+            while IFS= read -r line; do
+                if [ "$response_sent" = false ]; then
+                    echo -e "$line"
+                    response_sent=true
+                fi
+            done
+        }
+    done | nc -l -p $PORT 2>/dev/null || sleep 1
+}
 
-            if [ "$request_path" = "/" ]; then
-                # 检查index.html是否存在（在容器中的/app目录）
-                html_file="/app/index.html"
-                if [ ! -f "$html_file" ]; then
-                    # 尝试其他可能的路径
-                    if [ -f "./index.html" ]; then
-                        html_file="./index.html"
-                    elif [ -f "/index.html" ]; then
-                        html_file="/index.html"
-                    fi
-                fi
-                
-                if [ -f "$html_file" ]; then
-                    content_length=$(stat -c %s "$html_file")
-                    echo -e "HTTP/1.1 200 OK\r"
-                    echo -e "Content-Type: text/html; charset=utf-8\r"
-                    echo -e "Content-Length: $content_length\r"
-                    echo -e "\r"
-                    cat "$html_file"
-                else
-                    echo -e "HTTP/1.1 404 Not Found\r"
-                    echo -e "Content-Type: text/plain; charset=utf-8\r"
-                    echo -e "\r"
-                    echo "Web界面文件未找到"
-                fi
-            elif [ "$request_path" = "/api/status" ]; then
-                # 返回JSON数据
-                echo -e "HTTP/1.1 200 OK\r"
-                echo -e "Content-Type: application/json; charset=utf-8\r"
-                echo -e "Access-Control-Allow-Origin: *\r"
-                echo -e "\r"
-                if [ -f "$STATUS_FILE" ]; then
-                    cat "$STATUS_FILE"
-                else
-                    echo '{"error": "No data available"}'
-                fi
-            elif [ "$request_path" = "/api/log" ]; then
-                # 返回日志内容
-                echo -e "HTTP/1.1 200 OK\r"
-                echo -e "Content-Type: text/plain; charset=utf-8\r"
-                echo -e "\r"
-                if [ -f "$LOG_FILE" ]; then
-                    tail -n 50 "$LOG_FILE"
-                else
-                    echo "暂无日志"
-                fi
-            elif [ "$request_path" = "/api/config" ] && [ "$request_method" = "GET" ]; then
-                # 返回当前配置
-                echo -e "HTTP/1.1 200 OK\r"
-                echo -e "Content-Type: application/json; charset=utf-8\r"
-                echo -e "\r"
-                if [ -f "$CONFIG_FILE" ]; then
-                    cat "$CONFIG_FILE"
-                else
-                    echo '{"error": "Config file not found"}'
-                fi
-            elif [ "$request_path" = "/api/config" ] && [ "$request_method" = "POST" ]; then
-                # 处理配置更新请求
-                # 读取POST数据
-                content_length=$(echo "$header_line" | grep -i "content-length" | awk '{print $2}')
-                if [ -n "$content_length" ]; then
-                    read -n "$content_length" post_data
-                    echo "$post_data" > "$CONFIG_FILE"
-                fi
-                
-                echo -e "HTTP/1.1 200 OK\r"
-                echo -e "Content-Type: application/json; charset=utf-8\r"
-                echo -e "\r"
-                echo '{"status": "success", "message": "配置更新成功，将在下次数据收集时生效"}'
-            else
-                # 其他路径返回404
-                echo -e "HTTP/1.1 404 Not Found\r"
-                echo -e "Content-Type: text/plain; charset=utf-8\r"
-                echo -e "\r"
-                echo "页面未找到"
+# 处理HTTP请求
+handle_request() {
+    local request_method=$1
+    local request_path=$2
+    
+    if [ "$request_path" = "/" ]; then
+        # 检查index.html是否存在（在容器中的/app目录）
+        html_file="/app/index.html"
+        if [ ! -f "$html_file" ]; then
+            # 尝试其他可能的路径
+            if [ -f "./index.html" ]; then
+                html_file="./index.html"
+            elif [ -f "/index.html" ]; then
+                html_file="/index.html"
             fi
-        done
-    } | nc -l -p $PORT 2>/dev/null || sleep 1
+        fi
+        
+        if [ -f "$html_file" ]; then
+            content_length=$(stat -c %s "$html_file" 2>/dev/null || echo "0")
+            echo -e "HTTP/1.1 200 OK\r"
+            echo -e "Content-Type: text/html; charset=utf-8\r"
+            echo -e "Content-Length: $content_length\r"
+            echo -e "\r"
+            cat "$html_file"
+        else
+            echo -e "HTTP/1.1 404 Not Found\r"
+            echo -e "Content-Type: text/plain; charset=utf-8\r"
+            echo -e "\r"
+            echo "Web界面文件未找到"
+        fi
+    elif [ "$request_path" = "/api/status" ]; then
+        # 返回JSON数据
+        echo -e "HTTP/1.1 200 OK\r"
+        echo -e "Content-Type: application/json; charset=utf-8\r"
+        echo -e "Access-Control-Allow-Origin: *\r"
+        echo -e "\r"
+        if [ -f "$STATUS_FILE" ]; then
+            cat "$STATUS_FILE"
+        else
+            echo '{"error": "No data available"}'
+        fi
+    elif [ "$request_path" = "/api/log" ]; then
+        # 返回日志内容
+        echo -e "HTTP/1.1 200 OK\r"
+        echo -e "Content-Type: text/plain; charset=utf-8\r"
+        echo -e "\r"
+        if [ -f "$LOG_FILE" ]; then
+            tail -n 50 "$LOG_FILE"
+        else
+            echo "暂无日志"
+        fi
+    elif [ "$request_path" = "/api/config" ] && [ "$request_method" = "GET" ]; then
+        # 返回当前配置
+        echo -e "HTTP/1.1 200 OK\r"
+        echo -e "Content-Type: application/json; charset=utf-8\r"
+        echo -e "\r"
+        if [ -f "$CONFIG_FILE" ]; then
+            cat "$CONFIG_FILE"
+        else
+            echo '{"error": "Config file not found"}'
+        fi
+    elif [ "$request_path" = "/api/config" ] && [ "$request_method" = "POST" ]; then
+        # 处理配置更新请求
+        # 读取POST数据
+        content_length=$(echo "$header_line" | grep -i "content-length" | awk '{print $2}' | tr -d '\r\n')
+        if [ -n "$content_length" ] && [ "$content_length" -gt 0 ]; then
+            read -n "$content_length" post_data
+            echo "$post_data" > "$CONFIG_FILE"
+        fi
+        
+        echo -e "HTTP/1.1 200 OK\r"
+        echo -e "Content-Type: application/json; charset=utf-8\r"
+        echo -e "\r"
+        echo '{"status": "success", "message": "配置更新成功，将在下次数据收集时生效"}'
+    else
+        # 其他路径返回404
+        echo -e "HTTP/1.1 404 Not Found\r"
+        echo -e "Content-Type: text/plain; charset=utf-8\r"
+        echo -e "\r"
+        echo "页面未找到"
+    fi
 }
 
 # 后台定期更新数据

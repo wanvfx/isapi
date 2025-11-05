@@ -368,59 +368,6 @@ collect_status() {
     cat "$temp_json"
 }
 
-# 启动HTTP服务器
-start_http_server() {
-    log_message "HTTP服务器开始监听端口: ${PORT}"
-    
-    while true; do
-        # 直接使用nc监听端口并处理请求
-        local response=""
-        response=$( {
-            # 读取请求行
-            if IFS= read -r request_line; then
-                log_message "收到请求: $request_line"
-                
-                # 解析请求方法和路径
-                local request_method=$(echo "$request_line" | awk '{print $1}')
-                local request_path=$(echo "$request_line" | awk '{print $2}')
-                [ -z "$request_path" ] && request_path="/"
-                
-                # 读取并忽略请求头
-                local header_line
-                while IFS= read -r header_line && [ -n "$header_line" ]; do
-                    # 移除\r字符
-                    header_line=$(echo "$header_line" | tr -d '\r')
-                    # 检查是否为空行（请求头结束）
-                    [ -z "$header_line" ] && break
-                done
-                
-                # 处理请求
-                handle_request "$request_method" "$request_path" ""
-            fi
-        } | nc -l -p "$PORT" 2>/dev/null )
-        
-        # 发送响应（修复：直接输出响应而不是再次监听端口）
-        if [ -n "$response" ]; then
-            echo -e "$response"
-        else
-            # 如果没有生成响应，则返回错误信息
-            local error_response="HTTP/1.1 500 Internal Server Error\r\n"
-            error_response+="Content-Type: application/json; charset=utf-8\r\n"
-            error_response+="Access-Control-Allow-Origin: *\r\n"
-            error_response+="Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
-            error_response+="Access-Control-Allow-Headers: Content-Type\r\n"
-            error_response+="Content-Length: 21\r\n"
-            error_response+="Connection: close\r\n"
-            error_response+="\r\n"
-            error_response+='{"error": "Server error"}'
-            echo -e "$error_response"
-        fi
-        
-        sleep 1
-    done
-}
-
-
 # 处理HTTP请求
 handle_request() {
     local request_method=$1
@@ -628,6 +575,77 @@ EOF
         response+='{"error": "API endpoint not found"}'
         echo -e "$response"
     fi
+}
+
+# 启动HTTP服务器（修复版本 - 方案2）
+start_http_server() {
+    log_message "HTTP服务器开始监听端口: ${PORT}"
+    
+    while true; do
+        # 使用nc监听端口，为每个连接启动一个子shell
+        # 注意：这里使用了-e选项来执行脚本，但某些nc版本可能不支持
+        # 如果-e选项不可用，我们将使用管道方式
+        nc -l -p "$PORT" -e /bin/sh -c "
+            # 读取请求行
+            IFS= read -r request_line
+            timestamp=\$(date '+%Y-%m-%d %H:%M:%S')
+            echo \"\$timestamp | 收到请求: \$request_line\" >> \"$LOG_FILE\"
+            
+            # 解析请求方法和路径
+            request_method=\$(echo \"\$request_line\" | awk '{print \$1}')
+            request_path=\$(echo \"\$request_line\" | awk '{print \$2}')
+            [ -z \"\$request_path\" ] && request_path=\"/\"
+            
+            # 读取请求头，寻找Content-Length
+            content_length=0
+            while IFS= read -r header_line && [ -n \"\$header_line\" ]; do
+                header_line=\$(echo \"\$header_line\" | tr -d '\r')
+                # 检查是否为空行（请求头结束）
+                if [ -z \"\$header_line\" ]; then
+                    break
+                fi
+                # 解析Content-Length
+                if echo \"\$header_line\" | grep -i '^Content-Length:' > /dev/null; then
+                    content_length=\$(echo \"\$header_line\" | awk '{print \$2}')
+                fi
+            done
+            
+            # 处理请求并返回响应
+            $(typeset -f handle_request)
+            handle_request \"\$request_method\" \"\$request_path\" \"\$content_length\"
+        " 2>/dev/null || {
+            # 如果上面的命令失败（不支持-e选项），使用备用方案
+            log_message "使用备用HTTP服务器实现"
+            nc -l -p "$PORT" -c "
+                # 读取请求行
+                IFS= read -r request_line
+                timestamp=\$(date '+%Y-%m-%d %H:%M:%S')
+                echo \"\$timestamp | 收到请求: \$request_line\" >> \"$LOG_FILE\"
+                
+                # 解析请求方法和路径
+                request_method=\$(echo \"\$request_line\" | awk '{print \$1}')
+                request_path=\$(echo \"\$request_line\" | awk '{print \$2}')
+                [ -z \"\$request_path\" ] && request_path=\"/\"
+                
+                # 读取请求头
+                content_length=0
+                while IFS= read -r header_line && [ -n \"\$header_line\" ]; do
+                    header_line=\$(echo \"\$header_line\" | tr -d '\r')
+                    [ -z \"\$header_line\" ] && break
+                    if echo \"\$header_line\" | grep -i '^Content-Length:' > /dev/null; then
+                        content_length=\$(echo \"\$header_line\" | awk '{print \$2}')
+                    fi
+                done
+                
+                # 处理请求
+                $(typeset -f handle_request)
+                handle_request \"\$request_method\" \"\$request_path\" \"\$content_length\"
+            " 2>/dev/null
+        }
+        
+        # 短暂休眠避免CPU过度使用
+        sleep 0.1
+    done
 }
 
 # 主函数

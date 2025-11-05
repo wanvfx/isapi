@@ -368,9 +368,19 @@ start_http_server() {
     while true; do
         {
             # 读取请求行
+            local request_line=""
             if ! read -r request_line; then
-                continue
+                # 如果读取失败，等待一下再继续循环
+                sleep 0.1
+                return 1
             fi
+            
+            # 检查请求行是否为空
+            if [ -z "$request_line" ]; then
+                sleep 0.1
+                return 1
+            fi
+            
             log_message "收到请求: $request_line"
 
             # 临时变量存储 Content-Length
@@ -474,17 +484,34 @@ EOF
         # 返回JSON数据
         if [ -f "$STATUS_FILE" ] && [ -s "$STATUS_FILE" ]; then
             local file_content=$(cat "$STATUS_FILE")
-            local content_length=$(echo -n "$file_content" | wc -c)
-            local response="HTTP/1.1 200 OK\r\n"
-            response+="Content-Type: application/json; charset=utf-8\r\n"
-            response+="Access-Control-Allow-Origin: *\r\n"
-            response+="Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
-            response+="Access-Control-Allow-Headers: Content-Type\r\n"
-            response+="Content-Length: $content_length\r\n"
-            response+="Connection: close\r\n"
-            response+="\r\n"
-            response+="$file_content"
-            echo -e "$response"
+            # 检查内容是否为有效的JSON
+            if echo "$file_content" | jq . >/dev/null 2>&1; then
+                local content_length=$(echo -n "$file_content" | wc -c)
+                local response="HTTP/1.1 200 OK\r\n"
+                response+="Content-Type: application/json; charset=utf-8\r\n"
+                response+="Access-Control-Allow-Origin: *\r\n"
+                response+="Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+                response+="Access-Control-Allow-Headers: Content-Type\r\n"
+                response+="Content-Length: $content_length\r\n"
+                response+="Connection: close\r\n"
+                response+="\r\n"
+                response+="$file_content"
+                echo -e "$response"
+            else
+                # 内容不是有效的JSON
+                local error_response='{"error": "Invalid data format"}'
+                local content_length=$(echo -n "$error_response" | wc -c)
+                local response="HTTP/1.1 500 Internal Server Error\r\n"
+                response+="Content-Type: application/json; charset=utf-8\r\n"
+                response+="Access-Control-Allow-Origin: *\r\n"
+                response+="Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+                response+="Access-Control-Allow-Headers: Content-Type\r\n"
+                response+="Content-Length: $content_length\r\n"
+                response+="Connection: close\r\n"
+                response+="\r\n"
+                response+="$error_response"
+                echo -e "$response"
+            fi
         else
             local response="HTTP/1.1 404 Not Found\r\n"
             response+="Content-Type: application/json; charset=utf-8\r\n"
@@ -609,7 +636,7 @@ main() {
     } &
 
     # 等待第一次数据收集完成
-    sleep 1
+    sleep 2
 
     # 启动HTTP服务器
     start_http_server

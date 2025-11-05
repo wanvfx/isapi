@@ -168,11 +168,18 @@ get_memory_info() {
     mem_available=$(grep MemAvailable /proc/meminfo | awk '{print $2}' | tr -d '\r\n')
     mem_buffers=$(grep Buffers /proc/meminfo | awk '{print $2}' | tr -d '\r\n')
     mem_cached=$(grep Cached /proc/meminfo | awk '{print $2}' | grep -v SwapCached | head -1 | awk '{print $2}' | tr -d '\r\n')
-    
+
+    # 如果任何字段为空，则设置为0
+    [ -z "$mem_total" ] && mem_total=0
+    [ -z "$mem_free" ] && mem_free=0
+    [ -z "$mem_available" ] && mem_available=0
+    [ -z "$mem_buffers" ] && mem_buffers=0
+    [ -z "$mem_cached" ] && mem_cached=0
+
     # 计算使用率
     mem_used=$((mem_total - mem_free))
     mem_usage=$((100 * mem_used / mem_total))
-    
+
     # 返回JSON
     jq -n \
         --arg total "$mem_total" \
@@ -193,71 +200,17 @@ get_memory_info() {
         }'
 }
 
-# 获取温度信息
-get_temperature() {
-    # 尝试多种方式获取温度
-    temp=""
-    
-    # 方法1: 从thermal_zone获取
-    if [ -f "/sys/class/thermal/thermal_zone0/temp" ]; then
-        temp_raw=$(cat /sys/class/thermal/thermal_zone0/temp)
-        temp=$(echo $temp_raw | tr -d '\r\n' | awk '{printf "%.1f", $1/1000}')
-    fi
-    
-    # 方法2: 使用sensors命令
-    if command -v sensors >/dev/null 2>&1 && [ -z "$temp" ]; then
-        temp=$(sensors 2>/dev/null | grep -oE '[0-9]+\.[0-9]+°C' | head -1 | awk '{print $1}' | sed 's/°C//' | tr -d '\r\n')
-    fi
-    
-    # 如果获取不到温度，设为null
-    if [ -z "$temp" ]; then
-        temp="null"
-    fi
-    
-    # 返回JSON
-    if [ "$temp" = "null" ]; then
-        echo '{"celsius": null}'
-    else
-        jq -n --arg temp "$temp" '{celsius: ($temp | tonumber)}'
-    fi
-}
-
-# 获取网络接口信息
-get_network_info() {
-    # 获取默认网络接口
-    interfaces=$(ls /sys/class/net/ | grep -E 'eth|wlan|enp|wlp' | head -3)
-    
-    # 构建接口信息数组
-    interface_array="[]"
-    for interface in $interfaces; do
-        if [ -f "/sys/class/net/$interface/statistics/rx_bytes" ] && [ -f "/sys/class/net/$interface/statistics/tx_bytes" ]; then
-            rx_bytes_raw=$(cat /sys/class/net/$interface/statistics/rx_bytes)
-            tx_bytes_raw=$(cat /sys/class/net/$interface/statistics/tx_bytes)
-            
-            rx_bytes=$(echo "$rx_bytes_raw" | tr -d '\r\n')
-            tx_bytes=$(echo "$tx_bytes_raw" | tr -d '\r\n')
-            
-            interface_info=$(jq -n \
-                --arg name "$interface" \
-                --arg rx_bytes "$rx_bytes" \
-                --arg tx_bytes "$tx_bytes" \
-                '{name: $name, rx_bytes: ($rx_bytes | tonumber), tx_bytes: ($tx_bytes | tonumber)}')
-            
-            interface_array=$(echo "$interface_array" | jq --argjson info "$interface_info" '. + [$info]')
-        fi
-    done
-    
-    echo "$interface_array"
-}
-
 # 获取磁盘信息
 get_disk_info() {
     # 获取根文件系统使用情况
     disk_usage_raw=$(df / 2>/dev/null | tail -1 | awk '{print "{\"total\": "$2", \"used\": "$3", \"available\": "$4", \"usage\": \""$5"\"}"}')
-    
+
     if [ -n "$disk_usage_raw" ]; then
-        echo "$disk_usage_raw" | tr -d '\r\n' | jq .
+        # 移除可能的\r字符
+        disk_usage_raw=$(echo "$disk_usage_raw" | tr -d '\r\n')
+        echo "$disk_usage_raw" | jq .
     else
+        # 如果df命令失败，返回默认值
         echo '{"total": 0, "used": 0, "available": 0, "usage": "0%"}'
     fi
 }
@@ -267,7 +220,6 @@ start_http_server() {
     # 使用ncat或简单的bash TCP服务器
     {
         while true; do
-            # 读取请求行
             read -r request_line
             # 读取请求头，直到遇到空行
             # 处理Windows可能发送的CRLF换行符
@@ -283,17 +235,16 @@ start_http_server() {
             # 解析请求路径和方法
             request_method=$(echo "$request_line" | awk '{print $1}')
             request_path=$(echo "$request_line" | awk '{print $2}')
-            
-            # 根据路径返回不同内容
+
             if [ "$request_path" = "/" ]; then
-                # 返回Web界面
-                if [ -f "/app/index.html" ]; then
-                    content_length=$(stat -c %s /app/index.html)
+                # 检查index.html是否存在，否则返回404
+                if [ -f "/index.html" ]; then
+                    content_length=$(stat -c %s /index.html)
                     echo -e "HTTP/1.1 200 OK\r"
                     echo -e "Content-Type: text/html; charset=utf-8\r"
                     echo -e "Content-Length: $content_length\r"
                     echo -e "\r"
-                    cat /app/index.html
+                    cat /index.html
                 else
                     echo -e "HTTP/1.1 404 Not Found\r"
                     echo -e "Content-Type: text/plain; charset=utf-8\r"
@@ -356,7 +307,6 @@ start_http_server() {
         # 如果nc不可用，使用bash实现简单的HTTP服务器
         while true; do
             {
-                # 读取请求行
                 read -r request_line
                 # 读取请求头，直到遇到空行
                 # 处理Windows可能发送的CRLF换行符
@@ -372,17 +322,16 @@ start_http_server() {
                 # 解析请求路径和方法
                 request_method=$(echo "$request_line" | awk '{print $1}')
                 request_path=$(echo "$request_line" | awk '{print $2}')
-                
-                # 根据路径返回不同内容
+
                 if [ "$request_path" = "/" ]; then
-                    # 返回Web界面
-                    if [ -f "/app/index.html" ]; then
-                        content_length=$(stat -c %s /app/index.html)
+                    # 检查index.html是否存在，否则返回404
+                    if [ -f "/index.html" ]; then
+                        content_length=$(stat -c %s /index.html)
                         echo -e "HTTP/1.1 200 OK\r"
                         echo -e "Content-Type: text/html\r"
                         echo -e "Content-Length: $content_length\r"
                         echo -e "\r"
-                        cat /app/index.html
+                        cat /index.html
                     else
                         echo -e "HTTP/1.1 404 Not Found\r"
                         echo -e "Content-Type: text/plain\r"

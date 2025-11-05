@@ -50,13 +50,36 @@ log_message() {
 
 # 获取系统负载
 get_load_average() {
-    local load_avg_raw=$(cat /proc/loadavg 2>/dev/null | awk '{print $1","$2","$3}')
-    if [ -n "$load_avg_raw" ]; then
-        load_avg_raw=$(echo "$load_avg_raw" | tr -d '\r\n')
-        echo "$load_avg_raw" | jq -R 'split(",") | map(tonumber) | {load_avg_1: .[0], load_avg_5: .[1], load_avg_15: .[2]}'
-    else
-        echo '{"load_avg_1": 0, "load_avg_5": 0, "load_avg_15": 0}'
+    if [ -f "/proc/loadavg" ]; then
+        local load_avg_raw=$(cat /proc/loadavg 2>/dev/null)
+        if [ -n "$load_avg_raw" ]; then
+            load_avg_raw=$(echo "$load_avg_raw" | tr -d '\r\n')
+            local load1=$(echo "$load_avg_raw" | awk '{print $1}')
+            local load5=$(echo "$load_avg_raw" | awk '{print $2}')
+            local load15=$(echo "$load_avg_raw" | awk '{print $3}')
+            
+            # 确保所有值都是有效的浮点数
+            if [[ -n "$load1" ]] && [[ -n "$load5" ]] && [[ -n "$load15" ]] && \
+               [[ "$load1" =~ ^[0-9]+\.?[0-9]*$ ]] && [[ "$load5" =~ ^[0-9]+\.?[0-9]*$ ]] && [[ "$load15" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                
+                local load_info=$(jq -n \
+                    --arg load1 "$load1" \
+                    --arg load5 "$load5" \
+                    --arg load15 "$load15" \
+                    '{
+                        load_avg_1: ($load1 | tonumber),
+                        load_avg_5: ($load5 | tonumber),
+                        load_avg_15: ($load15 | tonumber)
+                    }')
+                
+                echo "$load_info"
+                return
+            fi
+        fi
     fi
+    
+    # 默认返回值
+    echo '{"load_avg_1": 0, "load_avg_5": 0, "load_avg_15": 0}'
 }
 
 # 获取CPU使用率
@@ -64,32 +87,94 @@ get_cpu_usage() {
     local cpu_line_raw=$(grep 'cpu ' /proc/stat 2>/dev/null)
     if [ -n "$cpu_line_raw" ]; then
         cpu_line_raw=$(echo "$cpu_line_raw" | tr -d '\r\n')
-        local cpu_line=$(echo "$cpu_line_raw" | awk '{print $2","$3","$4","$5","$6","$7","$8","$9}')
-        echo "$cpu_line" | jq -R 'split(",") | map(tonumber) | 
-        {
-            user: .[0],
-            nice: .[1],
-            system: .[2],
-            idle: .[3],
-            iowait: .[4],
-            irq: .[5],
-            softirq: .[6],
-            steal: .[7]
-        }'
-    else
-        echo '{"user": 0, "nice": 0, "system": 0, "idle": 0, "iowait": 0, "irq": 0, "softirq": 0, "steal": 0}'
+        # 使用更灵活的解析方式
+        local user=$(echo "$cpu_line_raw" | awk '{print $2}')
+        local nice=$(echo "$cpu_line_raw" | awk '{print $3}')
+        local system=$(echo "$cpu_line_raw" | awk '{print $4}')
+        local idle=$(echo "$cpu_line_raw" | awk '{print $5}')
+        local iowait=$(echo "$cpu_line_raw" | awk '{print $6}')
+        local irq=$(echo "$cpu_line_raw" | awk '{print $7}')
+        local softirq=$(echo "$cpu_line_raw" | awk '{print $8}')
+        local steal=$(echo "$cpu_line_raw" | awk '{print $9}')
+        
+        # 检查所有值是否存在且为数字
+        if [[ -n "$user" ]] && [[ -n "$nice" ]] && [[ -n "$system" ]] && [[ -n "$idle" ]] && \
+           [[ -n "$iowait" ]] && [[ -n "$irq" ]] && [[ -n "$softirq" ]] && [[ -n "$steal" ]] && \
+           [[ "$user" =~ ^[0-9]+$ ]] && [[ "$nice" =~ ^[0-9]+$ ]] && [[ "$system" =~ ^[0-9]+$ ]] && \
+           [[ "$idle" =~ ^[0-9]+$ ]] && [[ "$iowait" =~ ^[0-9]+$ ]] && [[ "$irq" =~ ^[0-9]+$ ]] && \
+           [[ "$softirq" =~ ^[0-9]+$ ]] && [[ "$steal" =~ ^[0-9]+$ ]]; then
+            
+            local cpu_info=$(jq -n \
+                --arg user "$user" \
+                --arg nice "$nice" \
+                --arg system "$system" \
+                --arg idle "$idle" \
+                --arg iowait "$iowait" \
+                --arg irq "$irq" \
+                --arg softirq "$softirq" \
+                --arg steal "$steal" \
+                '{
+                    user: ($user | tonumber),
+                    nice: ($nice | tonumber),
+                    system: ($system | tonumber),
+                    idle: ($idle | tonumber),
+                    iowait: ($iowait | tonumber),
+                    irq: ($irq | tonumber),
+                    softirq: ($softirq | tonumber),
+                    steal: ($steal | tonumber)
+                }')
+            
+            echo "$cpu_info"
+            return
+        fi
     fi
+    
+    # 默认返回值
+    echo '{"user": 0, "nice": 0, "system": 0, "idle": 0, "iowait": 0, "irq": 0, "softirq": 0, "steal": 0}'
 }
 
 # 获取内存信息
 get_memory_info() {
-    local mem_info=$(cat /proc/meminfo 2>/dev/null | grep -E 'MemTotal|MemFree|MemAvailable|Buffers|Cached')
-    if [ -n "$mem_info" ]; then
-        mem_info=$(echo "$mem_info" | tr -d '\r\n')
-        echo "$mem_info" | jq -R 'split("\n") | map(split(":")) | map({key: .[0], value: .[1] | sub(" kB$"; "") | tonumber}) | from_entries'
-    else
-        echo '{"MemTotal": 0, "MemFree": 0, "MemAvailable": 0, "Buffers": 0, "Cached": 0}'
+    if [ -f "/proc/meminfo" ]; then
+        local mem_total=$(grep '^MemTotal:' /proc/meminfo | awk '{print $2}')
+        local mem_free=$(grep '^MemFree:' /proc/meminfo | awk '{print $2}')
+        local mem_available=$(grep '^MemAvailable:' /proc/meminfo | awk '{print $2}')
+        local buffers=$(grep '^Buffers:' /proc/meminfo | awk '{print $2}')
+        local cached=$(grep '^Cached:' /proc/meminfo | awk '{print $2}')
+        
+        # 检查所有值是否存在且为数字
+        if [[ -n "$mem_total" ]] && [[ -n "$mem_free" ]] && [[ -n "$buffers" ]] && [[ -n "$cached" ]]; then
+            # MemAvailable在较老的内核中可能不存在
+            if [ -z "$mem_available" ]; then
+                mem_available=$mem_free
+            fi
+            
+            # 确保所有值都是数字
+            if [[ "$mem_total" =~ ^[0-9]+$ ]] && [[ "$mem_free" =~ ^[0-9]+$ ]] && \
+               [[ "$mem_available" =~ ^[0-9]+$ ]] && [[ "$buffers" =~ ^[0-9]+$ ]] && [[ "$cached" =~ ^[0-9]+$ ]]; then
+                
+                local mem_info=$(jq -n \
+                    --arg mem_total "$mem_total" \
+                    --arg mem_free "$mem_free" \
+                    --arg mem_available "$mem_available" \
+                    --arg buffers "$buffers" \
+                    --arg cached "$cached" \
+                    '{
+                        MemTotal: ($mem_total | tonumber),
+                        MemFree: ($mem_free | tonumber),
+                        MemAvailable: ($mem_available | tonumber),
+                        Buffers: ($buffers | tonumber),
+                        Cached: ($cached | tonumber)
+                    }')
+                
+                echo "$mem_info"
+                return
+            fi
+        fi
     fi
+    
+    # 默认返回值
+    echo '{"MemTotal": 0, "MemFree": 0, "MemAvailable": 0, "Buffers": 0, "Cached": 0}'
 }
 
 # 获取温度信息
@@ -97,17 +182,29 @@ get_temperature() {
     local temp_info="[]"
     if [ -d "/sys/class/thermal" ]; then
         for thermal_zone in /sys/class/thermal/thermal_zone*; do
-            if [ -f "$thermal_zone/type" ] && [ -f "$thermal_zone/temp" ]; then
-                local zone_type=$(cat "$thermal_zone/type" 2>/dev/null)
-                local zone_temp=$(cat "$thermal_zone/temp" 2>/dev/null)
-                if [ -n "$zone_type" ] && [ -n "$zone_temp" ]; then
-                    zone_type=$(echo "$zone_type" | tr -d '\r\n')
-                    zone_temp=$(echo "$zone_temp" | tr -d '\r\n')
-                    local temp_obj=$(jq -n \
-                        --arg type "$zone_type" \
-                        --arg temp "$zone_temp" \
-                        '{type: $type, temp: ($temp | tonumber)}')
-                    temp_info=$(echo "$temp_info" | jq --argjson obj "$temp_obj" '. + [$obj]')
+            # 检查路径是否存在
+            if [ -d "$thermal_zone" ]; then
+                if [ -f "$thermal_zone/type" ] && [ -f "$thermal_zone/temp" ]; then
+                    local zone_type=$(cat "$thermal_zone/type" 2>/dev/null)
+                    local zone_temp=$(cat "$thermal_zone/temp" 2>/dev/null)
+                    if [ -n "$zone_type" ] && [ -n "$zone_temp" ]; then
+                        zone_type=$(echo "$zone_type" | tr -d '\r\n')
+                        zone_temp=$(echo "$zone_temp" | tr -d '\r\n')
+                        
+                        # 确保温度值为数字
+                        if [[ "$zone_temp" =~ ^-?[0-9]+$ ]]; then
+                            # 处理温度值（有些系统以毫摄氏度为单位）
+                            if [ "$zone_temp" -gt 10000 ]; then
+                                zone_temp=$((zone_temp / 1000))
+                            fi
+                            
+                            local temp_obj=$(jq -n \
+                                --arg type "$zone_type" \
+                                --arg temp "$zone_temp" \
+                                '{type: $type, temp: ($temp | tonumber)}')
+                            temp_info=$(echo "$temp_info" | jq --argjson obj "$temp_obj" '. + [$obj]')
+                        fi
+                    fi
                 fi
             fi
         done
@@ -117,26 +214,37 @@ get_temperature() {
 
 # 获取网络接口信息
 get_network_info() {
-    # 获取默认网络接口
-    local interfaces=$(ls /sys/class/net/ | grep -E 'eth|wlan|enp|wlp' | head -3)
+    # 获取默认网络接口，增加更多可能的接口类型以提高兼容性
+    local interfaces=$(ls /sys/class/net/ 2>/dev/null | grep -E 'eth|wlan|enp|wlp|usb|ppp|br|vlan' | head -5)
+    
+    # 如果没有找到标准接口，尝试获取所有接口（排除loopback）
+    if [ -z "$interfaces" ]; then
+        interfaces=$(ls /sys/class/net/ 2>/dev/null | grep -v lo | head -5)
+    fi
     
     # 构建接口信息数组
     local interface_array="[]"
     for interface in $interfaces; do
         if [ -f "/sys/class/net/$interface/statistics/rx_bytes" ] && [ -f "/sys/class/net/$interface/statistics/tx_bytes" ]; then
-            local rx_bytes_raw=$(cat /sys/class/net/$interface/statistics/rx_bytes 2>/dev/null)
-            local tx_bytes_raw=$(cat /sys/class/net/$interface/statistics/tx_bytes 2>/dev/null)
+            local rx_bytes_raw=$(cat "/sys/class/net/$interface/statistics/rx_bytes" 2>/dev/null)
+            local tx_bytes_raw=$(cat "/sys/class/net/$interface/statistics/tx_bytes" 2>/dev/null)
             
-            rx_bytes_raw=$(echo "$rx_bytes_raw" | tr -d '\r\n')
-            tx_bytes_raw=$(echo "$tx_bytes_raw" | tr -d '\r\n')
-            
-            local interface_info=$(jq -n \
-                --arg name "$interface" \
-                --arg rx_bytes "$rx_bytes_raw" \
-                --arg tx_bytes "$tx_bytes_raw" \
-                '{name: $name, rx_bytes: ($rx_bytes | tonumber), tx_bytes: ($tx_bytes | tonumber)}')
-            
-            interface_array=$(echo "$interface_array" | jq --argjson info "$interface_info" '. + [$info]')
+            # 处理可能的空值或错误
+            if [ -n "$rx_bytes_raw" ] && [ -n "$tx_bytes_raw" ]; then
+                rx_bytes_raw=$(echo "$rx_bytes_raw" | tr -d '\r\n')
+                tx_bytes_raw=$(echo "$tx_bytes_raw" | tr -d '\r\n')
+                
+                # 确保值为数字
+                if [[ "$rx_bytes_raw" =~ ^[0-9]+$ ]] && [[ "$tx_bytes_raw" =~ ^[0-9]+$ ]]; then
+                    local interface_info=$(jq -n \
+                        --arg name "$interface" \
+                        --arg rx_bytes "$rx_bytes_raw" \
+                        --arg tx_bytes "$tx_bytes_raw" \
+                        '{name: $name, rx_bytes: ($rx_bytes | tonumber), tx_bytes: ($tx_bytes | tonumber)}')
+                    
+                    interface_array=$(echo "$interface_array" | jq --argjson info "$interface_info" '. + [$info]')
+                fi
+            fi
         fi
     done
     
@@ -146,13 +254,40 @@ get_network_info() {
 # 获取磁盘信息
 get_disk_info() {
     # 获取根文件系统使用情况
-    local disk_usage_raw=$(df / 2>/dev/null | tail -1 | awk '{print "{\"total\": "$2", \"used\": "$3", \"available\": "$4", \"usage\": \""$5"\"}"}')
+    local disk_usage_raw=$(df / 2>/dev/null | tail -1)
     
     if [ -n "$disk_usage_raw" ]; then
-        echo "$disk_usage_raw" | tr -d '\r\n' | jq .
-    else
-        echo '{"total": 0, "used": 0, "available": 0, "usage": "0%"}'
+        # 解析df命令输出
+        local total=$(echo "$disk_usage_raw" | awk '{print $2}')
+        local used=$(echo "$disk_usage_raw" | awk '{print $3}')
+        local available=$(echo "$disk_usage_raw" | awk '{print $4}')
+        local usage_percent=$(echo "$disk_usage_raw" | awk '{print $5}')
+        
+        # 确保所有值都存在且为数字
+        if [[ -n "$total" ]] && [[ -n "$used" ]] && [[ -n "$available" ]] && [[ -n "$usage_percent" ]]; then
+            # 移除可能的千位分隔符和百分号
+            total=$(echo "$total" | sed 's/[,%]//g')
+            used=$(echo "$used" | sed 's/[,%]//g')
+            available=$(echo "$available" | sed 's/[,%]//g')
+            usage_percent=$(echo "$usage_percent" | sed 's/[%]//g')
+            
+            # 确保所有值都是数字
+            if [[ "$total" =~ ^[0-9]+$ ]] && [[ "$used" =~ ^[0-9]+$ ]] && [[ "$available" =~ ^[0-9]+$ ]] && [[ "$usage_percent" =~ ^[0-9]+$ ]]; then
+                local disk_info=$(jq -n \
+                    --arg total "$total" \
+                    --arg used "$used" \
+                    --arg available "$available" \
+                    --arg usage "$usage_percent%" \
+                    '{total: ($total | tonumber), used: ($used | tonumber), available: ($available | tonumber), usage: $usage}')
+                
+                echo "$disk_info"
+                return
+            fi
+        fi
     fi
+    
+    # 默认返回值
+    echo '{"total": 0, "used": 0, "available": 0, "usage": "0%"}'
 }
 
 # 收集系统状态
@@ -168,44 +303,63 @@ collect_status() {
     # 添加系统负载
     if [ "$(get_config_value "enable_load_avg" "true")" = "true" ]; then
         local load_avg=$(get_load_average)
-        status+="\"load_avg\": $load_avg,"
+        # 确保返回的是有效的JSON
+        if [ -n "$load_avg" ]; then
+            status+="\"load_avg\": $load_avg,"
+        fi
     fi
     
     # 添加CPU使用率
     if [ "$(get_config_value "enable_cpu_usage" "true")" = "true" ]; then
         local cpu_usage=$(get_cpu_usage)
-        status+="\"cpu_usage\": $cpu_usage,"
+        # 确保返回的是有效的JSON
+        if [ -n "$cpu_usage" ]; then
+            status+="\"cpu_usage\": $cpu_usage,"
+        fi
     fi
     
     # 添加内存信息
     if [ "$(get_config_value "enable_memory_info" "true")" = "true" ]; then
         local memory_info=$(get_memory_info)
-        status+="\"memory_info\": $memory_info,"
+        # 确保返回的是有效的JSON
+        if [ -n "$memory_info" ]; then
+            status+="\"memory_info\": $memory_info,"
+        fi
     fi
     
     # 添加温度信息
     if [ "$(get_config_value "enable_temperature" "true")" = "true" ]; then
         local temperature=$(get_temperature)
-        status+="\"temperature\": $temperature,"
+        # 确保返回的是有效的JSON数组
+        if [ -n "$temperature" ]; then
+            status+="\"temperature\": $temperature,"
+        fi
     fi
     
     # 添加网络接口信息
     if [ "$(get_config_value "enable_network_info" "true")" = "true" ]; then
         local network_info=$(get_network_info)
-        status+="\"network_info\": $network_info,"
+        # 确保返回的是有效的JSON数组
+        if [ -n "$network_info" ]; then
+            status+="\"network_info\": $network_info,"
+        fi
     fi
     
     # 添加磁盘信息
     if [ "$(get_config_value "enable_disk_info" "true")" = "true" ]; then
         local disk_info=$(get_disk_info)
-        status+="\"disk_info\": $disk_info,"
+        # 确保返回的是有效的JSON
+        if [ -n "$disk_info" ]; then
+            status+="\"disk_info\": $disk_info,"
+        fi
     fi
     
     # 移除最后一个逗号并关闭JSON对象
     status=$(echo "$status" | sed 's/,$//')
     status+="}"
     
-    echo "$status" | jq .
+    # 确保最终输出是有效的JSON
+    echo "$status" | jq . 2>/dev/null || echo '{"error": "Failed to generate valid JSON"}'
 }
 
 # 启动HTTP服务器
@@ -260,6 +414,19 @@ handle_request() {
     local request_path=$2
     local content_length_header=$3
 
+    # 处理CORS预检请求
+    if [ "$request_method" = "OPTIONS" ]; then
+        local response="HTTP/1.1 200 OK\r\n"
+        response+="Access-Control-Allow-Origin: *\r\n"
+        response+="Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+        response+="Access-Control-Allow-Headers: Content-Type\r\n"
+        response+="Content-Length: 0\r\n"
+        response+="Connection: close\r\n"
+        response+="\r\n"
+        echo -e "$response"
+        return
+    fi
+
     if [ "$request_path" = "/" ]; then
         # 返回API说明信息
         local api_info=$(cat <<'EOF'
@@ -295,6 +462,9 @@ EOF
         local content_length=$(echo -n "$api_info" | wc -c)
         local response="HTTP/1.1 200 OK\r\n"
         response+="Content-Type: application/json; charset=utf-8\r\n"
+        response+="Access-Control-Allow-Origin: *\r\n"
+        response+="Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+        response+="Access-Control-Allow-Headers: Content-Type\r\n"
         response+="Content-Length: $content_length\r\n"
         response+="Connection: close\r\n"
         response+="\r\n"
@@ -308,6 +478,8 @@ EOF
             local response="HTTP/1.1 200 OK\r\n"
             response+="Content-Type: application/json; charset=utf-8\r\n"
             response+="Access-Control-Allow-Origin: *\r\n"
+            response+="Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+            response+="Access-Control-Allow-Headers: Content-Type\r\n"
             response+="Content-Length: $content_length\r\n"
             response+="Connection: close\r\n"
             response+="\r\n"
@@ -316,6 +488,9 @@ EOF
         else
             local response="HTTP/1.1 404 Not Found\r\n"
             response+="Content-Type: application/json; charset=utf-8\r\n"
+            response+="Access-Control-Allow-Origin: *\r\n"
+            response+="Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+            response+="Access-Control-Allow-Headers: Content-Type\r\n"
             response+="Connection: close\r\n"
             response+="\r\n"
             response+='{"error": "No data available"}'
@@ -328,6 +503,9 @@ EOF
             local content_length=$(echo -n "$content" | wc -c)
             local response="HTTP/1.1 200 OK\r\n"
             response+="Content-Type: text/plain; charset=utf-8\r\n"
+            response+="Access-Control-Allow-Origin: *\r\n"
+            response+="Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+            response+="Access-Control-Allow-Headers: Content-Type\r\n"
             response+="Content-Length: $content_length\r\n"
             response+="Connection: close\r\n"
             response+="\r\n"
@@ -336,29 +514,12 @@ EOF
         else
             local response="HTTP/1.1 404 Not Found\r\n"
             response+="Content-Type: text/plain; charset=utf-8\r\n"
+            response+="Access-Control-Allow-Origin: *\r\n"
+            response+="Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+            response+="Access-Control-Allow-Headers: Content-Type\r\n"
             response+="Connection: close\r\n"
             response+="\r\n"
             response+="暂无日志"
-            echo -e "$response"
-        fi
-    elif [ "$request_path" = "/api/config" ] && [ "$request_method" = "GET" ]; then
-        # 返回当前配置
-        if [ -f "$CONFIG_FILE" ]; then
-            local config_content=$(cat "$CONFIG_FILE")
-            local content_length=$(echo -n "$config_content" | wc -c)
-            local response="HTTP/1.1 200 OK\r\n"
-            response+="Content-Type: application/json; charset=utf-8\r\n"
-            response+="Content-Length: $content_length\r\n"
-            response+="Connection: close\r\n"
-            response+="\r\n"
-            response+="$config_content"
-            echo -e "$response"
-        else
-            local response="HTTP/1.1 404 Not Found\r\n"
-            response+="Content-Type: application/json; charset=utf-8\r\n"
-            response+="Connection: close\r\n"
-            response+="\r\n"
-            response+='{"error": "Config file not found"}'
             echo -e "$response"
         fi
     elif [ "$request_path" = "/api/config" ] && [ "$request_method" = "POST" ]; then
@@ -376,14 +537,46 @@ EOF
 
         local response="HTTP/1.1 200 OK\r\n"
         response+="Content-Type: application/json; charset=utf-8\r\n"
+        response+="Access-Control-Allow-Origin: *\r\n"
+        response+="Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+        response+="Access-Control-Allow-Headers: Content-Type\r\n"
         response+="Connection: close\r\n"
         response+="\r\n"
         response+='{"status": "success", "message": "配置更新成功，将在下次数据收集时生效"}'
         echo -e "$response"
+    elif [ "$request_path" = "/api/config" ] && [ "$request_method" = "GET" ]; then
+        # 返回当前配置
+        if [ -f "$CONFIG_FILE" ]; then
+            local config_content=$(cat "$CONFIG_FILE")
+            local content_length=$(echo -n "$config_content" | wc -c)
+            local response="HTTP/1.1 200 OK\r\n"
+            response+="Content-Type: application/json; charset=utf-8\r\n"
+            response+="Access-Control-Allow-Origin: *\r\n"
+            response+="Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+            response+="Access-Control-Allow-Headers: Content-Type\r\n"
+            response+="Content-Length: $content_length\r\n"
+            response+="Connection: close\r\n"
+            response+="\r\n"
+            response+="$config_content"
+            echo -e "$response"
+        else
+            local response="HTTP/1.1 404 Not Found\r\n"
+            response+="Content-Type: application/json; charset=utf-8\r\n"
+            response+="Access-Control-Allow-Origin: *\r\n"
+            response+="Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+            response+="Access-Control-Allow-Headers: Content-Type\r\n"
+            response+="Connection: close\r\n"
+            response+="\r\n"
+            response+='{"error": "Config file not found"}'
+            echo -e "$response"
+        fi
     else
         # 其他路径返回404
         local response="HTTP/1.1 404 Not Found\r\n"
         response+="Content-Type: application/json; charset=utf-8\r\n"
+        response+="Access-Control-Allow-Origin: *\r\n"
+        response+="Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+        response+="Access-Control-Allow-Headers: Content-Type\r\n"
         response+="Connection: close\r\n"
         response+="\r\n"
         response+='{"error": "API endpoint not found"}'

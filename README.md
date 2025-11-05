@@ -18,16 +18,11 @@ ISAPI 是一个基于 Docker 的轻量级系统监控解决方案，专为软路
 - 可配置的监控项（可选择启用/禁用特定监控功能）
 - 通过 HTTP API 提供 JSON 格式数据
 - 支持 CORS，便于前端调用
+- 多架构支持（x86/x64/ARM）
 
-## 快速部署（推荐）
+## 部署
 
-由于项目已通过 GitHub Actions 自动构建并发布到 Docker Hub，您可以直接从 Docker Hub 拉取镜像进行部署：
-
-```bash
-docker pull zoyayaayaya/isapi:latest
-```
-
-然后运行容器：
+使用以下命令部署 ISAPI 容器：
 
 ```bash
 docker run -d \
@@ -41,11 +36,11 @@ docker run -d \
   zoyayaayaya/isapi:latest
 ```
 
-参数说明：
-- `-d`: 后台运行容器
-- `--name isapi`: 给容器命名为 isapi
-- `--privileged`: 特权模式运行（必须，用于访问系统信息）
-- `-p 15130:15130`: 映射端口，主机端口:容器端口
+### 参数说明
+
+- `--name isapi`: 指定容器名称为 isapi
+- `--privileged`: 给予容器特权权限，以便访问系统信息
+- `-p 15130:15130`: 将容器的 15130 端口映射到主机的 15130 端口
 - `-v /proc:/proc:ro`: 挂载 /proc 目录（只读）
 - `-v /sys:/sys:ro`: 挂载 /sys 目录（只读）
 - `-v /etc:/etc:ro`: 挂载 /etc 目录（只读）
@@ -53,22 +48,26 @@ docker run -d \
 
 部署完成后，访问 `http://您的软路由IP:15130` 查看 API 接口信息。
 
+## 多架构支持
+
+本项目通过 GitHub Actions 实现了多架构 Docker 镜像构建，支持以下平台：
+
+- x86 (32位)
+- x86_64 (64位)
+- ARMv7 (如树莓派)
+- ARM64 (如 RK3328、RK3399 等软路由)
+
+无论您的软路由使用哪种 CPU 架构，都可以使用相同的部署命令来运行本项目。
+Docker 会自动选择适合您平台的镜像版本。
+
 ## 在 iStoreOS 上部署
 
 如果您使用的是 iStoreOS 系统（如 EasePi R1 软路由），可以通过系统内置的"解析 CLI"功能快速部署容器：
 
-1. 确保已拉取镜像：
-   ```bash
-   docker pull zoyayaayaya/isapi:latest
-   ```
-
-2. 打开 iStoreOS 的 Docker 管理界面
-
-3. 选择"创建新的 Docker 容器"
-
-4. 切换到"解析 CLI"标签页
-
-5. 在命令输入框中粘贴以下命令：
+1. 打开 iStoreOS 的 Docker 管理界面
+2. 选择"创建新的 Docker 容器"
+3. 切换到"解析 CLI"标签页
+4. 在命令输入框中粘贴以下命令：
    ```bash
    docker run -d \
      --name isapi \
@@ -80,12 +79,10 @@ docker run -d \
      --restart unless-stopped \
      zoyayaayaya/isapi:latest
    ```
-
-6. 点击"应用"按钮，系统将自动解析命令并创建容器
+5. 点击"应用"按钮，系统将自动解析命令并创建容器
 
 > **注意事项**：
 > - `--privileged` 参数是必需的，以便容器可以访问系统信息
-> - 确保使用的镜像与您的设备架构兼容（如 ARMv8）
 
 ## 验证部署结果
 

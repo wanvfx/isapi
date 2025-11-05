@@ -387,45 +387,43 @@ get_disk_info() {
 
 # 启动HTTP服务器
 start_http_server() {
-    # 使用ncat或简单的bash TCP服务器
+    log_message "HTTP服务器开始监听端口: ${PORT}"
     while true; do
-        # 读取请求并处理
-        {
-            # 读取请求行
-            read -r request_line
-            # 读取请求头，直到遇到空行
-            # 处理Windows可能发送的CRLF换行符
-            while read -r header_line; do
-                # 移除可能的\r字符
-                header_line=$(echo "$header_line" | tr -d '\r')
-                # 检查是否为空行
-                if [ -z "$header_line" ]; then
-                    break
-                fi
-            done
-            
-            # 解析请求路径和方法
-            request_method=$(echo "$request_line" | awk '{print $1}' | tr -d '\r\n')
-            request_path=$(echo "$request_line" | awk '{print $2}' | tr -d '\r\n')
-            
-            # 确保请求路径存在，默认为根路径
-            [ -z "$request_path" ] && request_path="/"
-            
-            # 处理不同的请求路径
-            handle_request "$request_method" "$request_path"
-        } | {
-            # 确保只发送一次响应
-            response_sent=false
-            
-            # 读取处理结果并发送响应
-            while IFS= read -r line; do
-                if [ "$response_sent" = false ]; then
-                    echo -e "$line"
-                    response_sent=true
-                fi
-            done
-        }
-    done | nc -l -p $PORT 2>/dev/null || sleep 1
+        # 使用一个简单的HTTP服务器实现
+        response=$(handle_http_request)
+        echo -e "$response"
+    done | nc -l -p $PORT -q 1 2>/dev/null || true
+}
+
+# 处理HTTP请求
+handle_http_request() {
+    # 读取请求行
+    read -r request_line
+    log_message "收到请求: $request_line"
+    
+    # 读取请求头，直到遇到空行
+    while read -r header_line; do
+        # 移除可能的\r字符
+        header_line=$(echo "$header_line" | tr -d '\r')
+        # 检查是否为空行（表示请求头结束）
+        if [ -z "$header_line" ]; then
+            break
+        fi
+        # 记录请求头（可选）
+        log_message "请求头: $header_line"
+    done
+    
+    # 解析请求路径和方法
+    request_method=$(echo "$request_line" | awk '{print $1}' | tr -d '\r\n')
+    request_path=$(echo "$request_line" | awk '{print $2}' | tr -d '\r\n')
+    
+    # 确保请求路径存在，默认为根路径
+    [ -z "$request_path" ] && request_path="/"
+    
+    log_message "处理请求: $request_method $request_path"
+    
+    # 处理不同的请求路径
+    handle_request "$request_method" "$request_path"
 }
 
 # 处理HTTP请求
@@ -447,47 +445,79 @@ handle_request() {
         
         if [ -f "$html_file" ]; then
             content_length=$(stat -c %s "$html_file" 2>/dev/null || echo "0")
-            echo -e "HTTP/1.1 200 OK\r"
-            echo -e "Content-Type: text/html; charset=utf-8\r"
-            echo -e "Content-Length: $content_length\r"
-            echo -e "\r"
-            cat "$html_file"
+            response="HTTP/1.1 200 OK\r\n"
+            response+="Content-Type: text/html; charset=utf-8\r\n"
+            response+="Content-Length: $content_length\r\n"
+            response+="Connection: close\r\n"
+            response+="\r\n"
+            response+=$(cat "$html_file")
+            echo -e "$response"
         else
-            echo -e "HTTP/1.1 404 Not Found\r"
-            echo -e "Content-Type: text/plain; charset=utf-8\r"
-            echo -e "\r"
-            echo "Web界面文件未找到"
+            response="HTTP/1.1 404 Not Found\r\n"
+            response+="Content-Type: text/plain; charset=utf-8\r\n"
+            response+="Connection: close\r\n"
+            response+="\r\n"
+            response+="Web界面文件未找到"
+            echo -e "$response"
         fi
     elif [ "$request_path" = "/api/status" ]; then
         # 返回JSON数据
-        echo -e "HTTP/1.1 200 OK\r"
-        echo -e "Content-Type: application/json; charset=utf-8\r"
-        echo -e "Access-Control-Allow-Origin: *\r"
-        echo -e "\r"
         if [ -f "$STATUS_FILE" ]; then
-            cat "$STATUS_FILE"
+            content_length=$(stat -c %s "$STATUS_FILE" 2>/dev/null || echo "0")
+            response="HTTP/1.1 200 OK\r\n"
+            response+="Content-Type: application/json; charset=utf-8\r\n"
+            response+="Access-Control-Allow-Origin: *\r\n"
+            response+="Content-Length: $content_length\r\n"
+            response+="Connection: close\r\n"
+            response+="\r\n"
+            response+=$(cat "$STATUS_FILE")
+            echo -e "$response"
         else
-            echo '{"error": "No data available"}'
+            response="HTTP/1.1 404 Not Found\r\n"
+            response+="Content-Type: application/json; charset=utf-8\r\n"
+            response+="Connection: close\r\n"
+            response+="\r\n"
+            response+='{"error": "No data available"}'
+            echo -e "$response"
         fi
     elif [ "$request_path" = "/api/log" ]; then
         # 返回日志内容
-        echo -e "HTTP/1.1 200 OK\r"
-        echo -e "Content-Type: text/plain; charset=utf-8\r"
-        echo -e "\r"
         if [ -f "$LOG_FILE" ]; then
-            tail -n 50 "$LOG_FILE"
+            content=$(tail -n 50 "$LOG_FILE")
+            content_length=$(echo -n "$content" | wc -c)
+            response="HTTP/1.1 200 OK\r\n"
+            response+="Content-Type: text/plain; charset=utf-8\r\n"
+            response+="Content-Length: $content_length\r\n"
+            response+="Connection: close\r\n"
+            response+="\r\n"
+            response+="$content"
+            echo -e "$response"
         else
-            echo "暂无日志"
+            response="HTTP/1.1 404 Not Found\r\n"
+            response+="Content-Type: text/plain; charset=utf-8\r\n"
+            response+="Connection: close\r\n"
+            response+="\r\n"
+            response+="暂无日志"
+            echo -e "$response"
         fi
     elif [ "$request_path" = "/api/config" ] && [ "$request_method" = "GET" ]; then
         # 返回当前配置
-        echo -e "HTTP/1.1 200 OK\r"
-        echo -e "Content-Type: application/json; charset=utf-8\r"
-        echo -e "\r"
         if [ -f "$CONFIG_FILE" ]; then
-            cat "$CONFIG_FILE"
+            content_length=$(stat -c %s "$CONFIG_FILE" 2>/dev/null || echo "0")
+            response="HTTP/1.1 200 OK\r\n"
+            response+="Content-Type: application/json; charset=utf-8\r\n"
+            response+="Content-Length: $content_length\r\n"
+            response+="Connection: close\r\n"
+            response+="\r\n"
+            response+=$(cat "$CONFIG_FILE")
+            echo -e "$response"
         else
-            echo '{"error": "Config file not found"}'
+            response="HTTP/1.1 404 Not Found\r\n"
+            response+="Content-Type: application/json; charset=utf-8\r\n"
+            response+="Connection: close\r\n"
+            response+="\r\n"
+            response+='{"error": "Config file not found"}'
+            echo -e "$response"
         fi
     elif [ "$request_path" = "/api/config" ] && [ "$request_method" = "POST" ]; then
         # 处理配置更新请求
@@ -498,16 +528,20 @@ handle_request() {
             echo "$post_data" > "$CONFIG_FILE"
         fi
         
-        echo -e "HTTP/1.1 200 OK\r"
-        echo -e "Content-Type: application/json; charset=utf-8\r"
-        echo -e "\r"
-        echo '{"status": "success", "message": "配置更新成功，将在下次数据收集时生效"}'
+        response="HTTP/1.1 200 OK\r\n"
+        response+="Content-Type: application/json; charset=utf-8\r\n"
+        response+="Connection: close\r\n"
+        response+="\r\n"
+        response+='{"status": "success", "message": "配置更新成功，将在下次数据收集时生效"}'
+        echo -e "$response"
     else
         # 其他路径返回404
-        echo -e "HTTP/1.1 404 Not Found\r"
-        echo -e "Content-Type: text/plain; charset=utf-8\r"
-        echo -e "\r"
-        echo "页面未找到"
+        response="HTTP/1.1 404 Not Found\r\n"
+        response+="Content-Type: text/plain; charset=utf-8\r\n"
+        response+="Connection: close\r\n"
+        response+="\r\n"
+        response+="页面未找到"
+        echo -e "$response"
     fi
 }
 

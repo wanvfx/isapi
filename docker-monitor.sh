@@ -577,47 +577,60 @@ EOF
     fi
 }
 
-# 启动HTTP服务器（最终版本）
+# 启动HTTP服务器（最终工作版本）
 start_http_server() {
     log_message "HTTP服务器开始监听端口: ${PORT}"
     
-    # 采用最简单的实现方式，避免重复日志
     while true; do
-        {
-            # 读取请求行
-            IFS= read -r request_line
-            request_line=$(echo "$request_line" | tr -d '\r')
-            
-            if [ -n "$request_line" ]; then
-                # 解析请求方法和路径
-                request_method=$(echo "$request_line" | awk '{print $1}')
-                request_path=$(echo "$request_line" | awk '{print $2}')
-                [ -z "$request_path" ] && request_path="/"
-                
-                log_message "收到请求: $request_method $request_path"
-                
-                # 读取请求头，寻找Content-Length
-                content_length=0
-                while IFS= read -r header_line; do
-                    header_line=$(echo "$header_line" | tr -d '\r')
-                    # 检查是否为空行（请求头结束）
-                    if [ -z "$header_line" ]; then
-                        break
-                    fi
-                    # 解析Content-Length
-                    if echo "$header_line" | grep -i '^Content-Length:' > /dev/null; then
-                        content_length=$(echo "$header_line" | awk '{print $2}')
-                    fi
-                done
-                
-                # 处理请求并返回响应
-                handle_request "$request_method" "$request_path" "$content_length"
-            fi
-        } | nc -l -p "$PORT" >/dev/null 2>&1
+        # 直接使用nc监听并处理请求
+        local response=""
+        response=$(handle_client_request)
+        
+        # 将响应发送回客户端
+        if [ -n "$response" ]; then
+            echo -e "$response" | nc -l -p "$PORT" >/dev/null 2>&1
+        fi
         
         # 短暂休眠避免CPU过度使用
         sleep 0.1
     done
+}
+
+# 处理客户端请求
+handle_client_request() {
+    # 读取HTTP请求
+    local request=""
+    local request_line=""
+    local request_method=""
+    local request_path="/"
+    local content_length=0
+    
+    # 读取请求的第一行
+    IFS= read -r request_line
+    request_line=$(echo "$request_line" | tr -d '\r')
+    
+    if [ -n "$request_line" ]; then
+        request_method=$(echo "$request_line" | awk '{print $1}')
+        request_path=$(echo "$request_line" | awk '{print $2}')
+        [ -z "$request_path" ] && request_path="/"
+        
+        log_message "收到请求: $request_method $request_path"
+        
+        # 读取请求头
+        while IFS= read -r header_line; do
+            header_line=$(echo "$header_line" | tr -d '\r')
+            # 空行表示请求头结束
+            [ -z "$header_line" ] && break
+            
+            # 查找Content-Length
+            if echo "$header_line" | grep -i "^Content-Length:" >/dev/null 2>&1; then
+                content_length=$(echo "$header_line" | awk '{print $2}')
+            fi
+        done
+        
+        # 处理请求并返回响应
+        handle_request "$request_method" "$request_path" "$content_length"
+    fi
 }
 
 # 处理传入请求的函数

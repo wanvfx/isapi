@@ -296,6 +296,7 @@ start_http_server() {
     # 使用ncat或简单的bash TCP服务器
     {
         while true; do
+            # 读取请求行
             read -r request_line
             # 读取请求头，直到遇到空行
             # 处理Windows可能发送的CRLF换行符
@@ -316,16 +317,9 @@ start_http_server() {
             [ -z "$request_path" ] && request_path="/"
 
             if [ "$request_path" = "/" ]; then
-                # 检查index.html是否存在（在多个可能位置）
-                html_file=""
-                for path in "/index.html" "./index.html" "/app/index.html"; do
-                    if [ -f "$path" ]; then
-                        html_file="$path"
-                        break
-                    fi
-                done
-                
-                if [ -n "$html_file" ]; then
+                # 检查index.html是否存在（在容器中的/app目录）
+                html_file="/app/index.html"
+                if [ -f "$html_file" ]; then
                     content_length=$(stat -c %s "$html_file")
                     echo -e "HTTP/1.1 200 OK\r"
                     echo -e "Content-Type: text/html; charset=utf-8\r"
@@ -336,7 +330,7 @@ start_http_server() {
                     echo -e "HTTP/1.1 404 Not Found\r"
                     echo -e "Content-Type: text/plain; charset=utf-8\r"
                     echo -e "\r"
-                    echo "Web界面文件未找到"
+                    echo "Web界面文件未找到: $html_file"
                 fi
             elif [ "$request_path" = "/api/status" ]; then
                 # 返回JSON数据
@@ -387,13 +381,14 @@ start_http_server() {
                 echo -e "HTTP/1.1 404 Not Found\r"
                 echo -e "Content-Type: text/plain; charset=utf-8\r"
                 echo -e "\r"
-                echo "页面未找到"
+                echo "页面未找到: $request_path"
             fi
         done
     } | nc -l -p $PORT 2>/dev/null || {
         # 如果nc不可用，使用bash实现简单的HTTP服务器
         while true; do
             {
+                # 读取请求行
                 read -r request_line
                 # 读取请求头，直到遇到空行
                 # 处理Windows可能发送的CRLF换行符
@@ -414,16 +409,9 @@ start_http_server() {
                 [ -z "$request_path" ] && request_path="/"
 
                 if [ "$request_path" = "/" ]; then
-                    # 检查index.html是否存在（在多个可能位置）
-                    html_file=""
-                    for path in "/index.html" "./index.html" "/app/index.html"; do
-                        if [ -f "$path" ]; then
-                            html_file="$path"
-                            break
-                        fi
-                    done
-                    
-                    if [ -n "$html_file" ]; then
+                    # 检查index.html是否存在（在容器中的/app目录）
+                    html_file="/app/index.html"
+                    if [ -f "$html_file" ]; then
                         content_length=$(stat -c %s "$html_file")
                         echo -e "HTTP/1.1 200 OK\r"
                         echo -e "Content-Type: text/html; charset=utf-8\r"
@@ -434,7 +422,7 @@ start_http_server() {
                         echo -e "HTTP/1.1 404 Not Found\r"
                         echo -e "Content-Type: text/plain; charset=utf-8\r"
                         echo -e "\r"
-                        echo "Web界面文件未找到"
+                        echo "Web界面文件未找到: $html_file"
                     fi
                 elif [ "$request_path" = "/api/status" ]; then
                     # 返回JSON数据
@@ -485,7 +473,7 @@ start_http_server() {
                     echo -e "HTTP/1.1 404 Not Found\r"
                     echo -e "Content-Type: text/plain; charset=utf-8\r"
                     echo -e "\r"
-                    echo "页面未找到"
+                    echo "页面未找到: $request_path"
                 fi
             } | nc -l -p $PORT 2>/dev/null || sleep 1
         done

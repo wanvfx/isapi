@@ -202,85 +202,78 @@ get_memory_info() {
 
 # 获取温度信息
 get_temperature() {
-    # 尝试从不同的温度传感器文件读取数据
-    local temp_files=(
-        "/sys/class/thermal/thermal_zone*/temp"
-        "/sys/devices/virtual/thermal/thermal_zone*/temp"
-        "/sys/class/hwmon/hwmon*/temp1_input"
-    )
+    # 尝试多种方式获取温度
+    temp=""
     
-    for file in "${temp_files[@]}"; do
-        if [ -f "$file" ]; then
-            # 读取温度值（单位为毫摄氏度）
-            temp=$(cat "$file" 2>/dev/null)
-            if [ -n "$temp" ]; then
-                # 转换为摄氏度并返回JSON
-                celsius=$(echo "$temp" | awk '{print $1/1000}')
-                jq -n --argjson celsius "$celsius" '{celsius: $celsius}'
-                return 0
-            fi
-        fi
-    done
+    # 方法1: 从thermal_zone获取
+    if [ -f "/sys/class/thermal/thermal_zone0/temp" ]; then
+        temp_raw=$(cat /sys/class/thermal/thermal_zone0/temp)
+        temp=$(echo $temp_raw | tr -d '\r\n' | awk '{printf "%.1f", $1/1000}')
+    fi
     
-    # 如果没有找到温度传感器，返回null
-    jq -n 'null'
+    # 方法2: 使用sensors命令
+    if command -v sensors >/dev/null 2>&1 && [ -z "$temp" ]; then
+        temp=$(sensors 2>/dev/null | grep -oE '[0-9]+\.[0-9]+°C' | head -1 | awk '{print $1}' | sed 's/°C//' | tr -d '\r\n')
+    fi
+    
+    # 如果获取不到温度，设为null
+    if [ -z "$temp" ]; then
+        temp="null"
+    fi
+    
+    # 返回JSON
+    if [ "$temp" = "null" ]; then
+        echo '{"celsius": null}'
+    else
+        jq -n --arg temp "$temp" '{celsius: ($temp | tonumber)}'
+    fi
 }
 
 # 获取网络接口信息
 get_network_info() {
-    # 使用ip命令获取网络接口信息
-    if command -v ip >/dev/null 2>&1; then
-        # 获取所有活动的网络接口
-        interfaces=$(ip link show up | grep -o '^[0-9]*:' | cut -d':' -f1)
-        
-        # 初始化JSON数组
-        network_array="[]"
-        
-        # 遍历每个接口
-        for interface in $interfaces; do
-            # 获取接口名称
-            name=$(ip link show "$interface" | grep -o '^[^:]*:' | cut -d':' -f1)
-            
-            # 获取IP地址
-            ip_addr=$(ip addr show "$interface" | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1)
-            
-            # 获取流量统计
-            rx_bytes=$(cat /sys/class/net/$name/statistics/rx_bytes 2>/dev/null || echo "0")
-            tx_bytes=$(cat /sys/class/net/$name/statistics/tx_bytes 2>/dev/null || echo "0")
-            
-            # 构建接口信息
-            interface_json=$(jq -n \
-                --arg name "$name" \
-                --arg ip_addr "$ip_addr" \
-                --argjson rx_bytes "$rx_bytes" \
-                --argjson tx_bytes "$tx_bytes" \
-                '{
-                    name: $name,
-                    ip_address: $ip_addr,
-                    rx_bytes: $rx_bytes,
-                    tx_bytes: $tx_bytes
-                }')
-            
-            # 添加到数组
-            network_array=$(echo "$network_array" | jq --argjson interface "$interface_json" '. + [$interface]')
-        done
-        
-        echo "$network_array"
-    else
-        # 如果ip命令不可用，尝试使用ifconfig
-        if command -v ifconfig >/dev/null 2>&1; then
-            # 使用ifconfig获取网络接口信息
-            ifconfig | grep -A 5 "^[a-zA-Z]" | grep -E "(inet|RX packets|TX packets)" | awk '
-            /inet/ && !/127.0.0.1/ {ip = $2}
-            /RX packets/ {rx_packets = $2}
-            /TX packets/ {tx_packets = $2}
-            END {print "{\"name\": \""$1"\", \"ip_address\": \""ip"\", \"rx_packets\": "rx_packets", \"tx_packets\": "tx_packets"}"}
-            '
-        else
-            # 如果都没有可用，返回空数组
-            jq -n '[]'
-        fi
+    # 获取网络接口
+    interfaces=$(ls /sys/class/net/ 2>/dev/null | grep -E 'eth|wlan|enp|wlp|br|docker' | head -5)
+    
+    # 如果没有找到接口，尝试使用ip命令
+    if [ -z "$interfaces" ]; then
+        interfaces=$(ip -o link show | awk -F': ' '{print $2}' | head -5)
     fi
+    
+    # 构建接口信息数组
+    interface_array="[]"
+    for interface in $interfaces; do
+        # 跳过lo接口
+        if [ "$interface" = "lo" ]; then
+            continue
+        fi
+        
+        rx_bytes=0
+        tx_bytes=0
+        
+        # 尝试从sysfs获取流量统计
+        if [ -f "/sys/class/net/$interface/statistics/rx_bytes" ] && [ -f "/sys/class/net/$interface/statistics/tx_bytes" ]; then
+            rx_bytes_raw=$(cat /sys/class/net/$interface/statistics/rx_bytes 2>/dev/null)
+            tx_bytes_raw=$(cat /sys/class/net/$interface/statistics/tx_bytes 2>/dev/null)
+            
+            # 清理数据
+            rx_bytes=$(echo "$rx_bytes_raw" | tr -d '\r\n')
+            tx_bytes=$(echo "$tx_bytes_raw" | tr -d '\r\n')
+            
+            # 如果读取失败，设为0
+            [ -z "$rx_bytes" ] && rx_bytes=0
+            [ -z "$tx_bytes" ] && tx_bytes=0
+        fi
+        
+        interface_info=$(jq -n \
+            --arg name "$interface" \
+            --arg rx_bytes "$rx_bytes" \
+            --arg tx_bytes "$tx_bytes" \
+            '{name: $name, rx_bytes: ($rx_bytes | tonumber), tx_bytes: ($tx_bytes | tonumber)}')
+        
+        interface_array=$(echo "$interface_array" | jq --argjson info "$interface_info" '. + [$info]')
+    done
+    
+    echo "$interface_array"
 }
 
 # 获取磁盘信息
@@ -318,16 +311,27 @@ start_http_server() {
             # 解析请求路径和方法
             request_method=$(echo "$request_line" | awk '{print $1}')
             request_path=$(echo "$request_line" | awk '{print $2}')
+            
+            # 确保请求路径存在，默认为根路径
+            [ -z "$request_path" ] && request_path="/"
 
             if [ "$request_path" = "/" ]; then
-                # 检查index.html是否存在，否则返回404
-                if [ -f "/index.html" ]; then
-                    content_length=$(stat -c %s /index.html)
+                # 检查index.html是否存在（在多个可能位置）
+                html_file=""
+                for path in "/index.html" "./index.html" "/app/index.html"; do
+                    if [ -f "$path" ]; then
+                        html_file="$path"
+                        break
+                    fi
+                done
+                
+                if [ -n "$html_file" ]; then
+                    content_length=$(stat -c %s "$html_file")
                     echo -e "HTTP/1.1 200 OK\r"
                     echo -e "Content-Type: text/html; charset=utf-8\r"
                     echo -e "Content-Length: $content_length\r"
                     echo -e "\r"
-                    cat /index.html
+                    cat "$html_file"
                 else
                     echo -e "HTTP/1.1 404 Not Found\r"
                     echo -e "Content-Type: text/plain; charset=utf-8\r"
@@ -405,16 +409,27 @@ start_http_server() {
                 # 解析请求路径和方法
                 request_method=$(echo "$request_line" | awk '{print $1}')
                 request_path=$(echo "$request_line" | awk '{print $2}')
+                
+                # 确保请求路径存在，默认为根路径
+                [ -z "$request_path" ] && request_path="/"
 
                 if [ "$request_path" = "/" ]; then
-                    # 检查index.html是否存在，否则返回404
-                    if [ -f "/index.html" ]; then
-                        content_length=$(stat -c %s /index.html)
+                    # 检查index.html是否存在（在多个可能位置）
+                    html_file=""
+                    for path in "/index.html" "./index.html" "/app/index.html"; do
+                        if [ -f "$path" ]; then
+                            html_file="$path"
+                            break
+                        fi
+                    done
+                    
+                    if [ -n "$html_file" ]; then
+                        content_length=$(stat -c %s "$html_file")
                         echo -e "HTTP/1.1 200 OK\r"
                         echo -e "Content-Type: text/html; charset=utf-8\r"
                         echo -e "Content-Length: $content_length\r"
                         echo -e "\r"
-                        cat /index.html
+                        cat "$html_file"
                     else
                         echo -e "HTTP/1.1 404 Not Found\r"
                         echo -e "Content-Type: text/plain; charset=utf-8\r"
@@ -489,4 +504,8 @@ start_http_server() {
 
 # 启动HTTP服务器
 log_message "启动HTTP服务器，监听端口: ${PORT}"
-start_http_server
+# 直接在前台运行HTTP服务器，不使用函数包装
+while true; do
+    start_http_server
+    sleep 1
+done

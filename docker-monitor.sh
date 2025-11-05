@@ -1,13 +1,15 @@
 #!/bin/bash
 
-# 设置变量
+# ISAPI - 系统监控工具
+# 用于在软路由上监控系统状态并通过HTTP API提供数据
+
+# 配置部分
 PORT=${PORT:-15130}
 REFRESH_INTERVAL=${REFRESH_INTERVAL:-5}
-STATUS_FILE="/tmp/status.json"
-LOG_FILE="/tmp/app.log"
-CONFIG_FILE="/tmp/config.json"
+LOG_FILE="/app/isapi.log"
+STATUS_FILE="/app/status.json"
+CONFIG_FILE="/app/config.json"
 
-# 默认配置
 DEFAULT_CONFIG='{
   "enable_timestamp": "true",
   "enable_load_avg": "true",
@@ -45,7 +47,16 @@ get_config_value() {
 # 记录日志
 log_message() {
     local message=$1
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $message" >> "$LOG_FILE"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    local log_line="$timestamp | $message"
+    
+    # 确保日志文件可写
+    if [ -w "$(dirname "$LOG_FILE")" ] || [ -w "$LOG_FILE" ]; then
+        echo "$log_line" >> "$LOG_FILE"
+    fi
+    
+    # 同时输出到标准错误，这样可以通过docker logs查看
+    echo "$log_line" >&2
 }
 
 # 获取系统负载
@@ -413,6 +424,12 @@ start_http_server() {
             # 处理请求并传入 content_length（用于POST）
             handle_request "$request_method" "$request_path" "$content_length"
         } | nc -l -p "$PORT" -q 1 2>/dev/null || true
+        
+        # 检查nc命令是否成功运行
+        if [ $? -ne 0 ]; then
+            log_message "警告: HTTP服务器遇到错误"
+        fi
+        
         sleep 0.1
     done
 }
@@ -525,7 +542,7 @@ EOF
         fi
     elif [ "$request_path" = "/api/log" ]; then
         # 返回日志内容
-        if [ -f "$LOG_FILE" ]; then
+        if [ -f "$LOG_FILE" ] && [ -s "$LOG_FILE" ]; then
             local content=$(tail -n 50 "$LOG_FILE")
             local content_length=$(echo -n "$content" | wc -c)
             local response="HTTP/1.1 200 OK\r\n"
@@ -613,6 +630,9 @@ EOF
 
 # 主函数
 main() {
+    # 确保日志文件存在
+    touch "$LOG_FILE"
+    
     log_message "Starting ISAPI service on port $PORT"
     log_message "API endpoints:"
     log_message "  GET  http://localhost:$PORT/ - API说明信息"
@@ -629,8 +649,13 @@ main() {
     {
         log_message "开始数据收集任务，刷新间隔: ${REFRESH_INTERVAL}秒"
         while true; do
-            collect_status > "$STATUS_FILE"
-            log_message "系统信息已更新"
+            # 确保状态文件目录可写
+            if [ -w "$(dirname "$STATUS_FILE")" ] || [ -w "$STATUS_FILE" ]; then
+                collect_status > "$STATUS_FILE" 2>/dev/null
+                log_message "系统信息已更新"
+            else
+                log_message "警告: 无法写入状态文件 $STATUS_FILE"
+            fi
             sleep "$REFRESH_INTERVAL"
         done
     } &

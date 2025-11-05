@@ -21,6 +21,9 @@ COPY docker-monitor.sh .
 # 设置脚本可执行权限
 RUN chmod +x docker-monitor.sh
 
+# 创建日志和状态文件
+RUN touch /app/isapi.log /app/status.json
+
 # 暴露端口
 EXPOSE 15130
 

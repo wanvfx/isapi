@@ -10,7 +10,7 @@ RUN apk add --no-cache \
     lm-sensors \
     iproute2 \
     util-linux \
-    netcat-openbsd
+    socat
 
 # 创建工作目录
 WORKDIR /app
@@ -22,7 +22,7 @@ COPY docker-monitor.sh .
 RUN chmod +x docker-monitor.sh
 
 # 创建日志和状态文件
-RUN touch /app/isapi.log /app/status.json
+RUN touch /app/isapi.log /app/status.json /app/config.json
 
 # 暴露端口
 EXPOSE 15130

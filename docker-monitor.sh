@@ -303,132 +303,102 @@ get_disk_info() {
 
 # 收集系统状态
 collect_status() {
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    local status="{"
+    # 使用临时文件构建JSON对象，避免字符串拼接错误
+    local temp_json=$(mktemp)
+    trap 'rm -f "$temp_json"' EXIT
+    
+    # 初始化基础JSON对象
+    echo '{}' > "$temp_json"
     
     # 添加时间戳
     if [ "$(get_config_value "enable_timestamp" "true")" = "true" ]; then
-        status+="\"timestamp\": \"$timestamp\","
+        local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+        jq --arg ts "$timestamp" '. + {timestamp: $ts}' "$temp_json" > "$temp_json.tmp" && mv "$temp_json.tmp" "$temp_json"
     fi
     
     # 添加系统负载
     if [ "$(get_config_value "enable_load_avg" "true")" = "true" ]; then
         local load_avg=$(get_load_average)
-        # 确保返回的是有效的JSON
-        if [ -n "$load_avg" ]; then
-            status+="\"load_avg\": $load_avg,"
+        if echo "$load_avg" | jq empty >/dev/null 2>&1; then
+            jq --argjson load "$load_avg" '. + {load_avg: $load}' "$temp_json" > "$temp_json.tmp" && mv "$temp_json.tmp" "$temp_json"
         fi
     fi
     
     # 添加CPU使用率
     if [ "$(get_config_value "enable_cpu_usage" "true")" = "true" ]; then
         local cpu_usage=$(get_cpu_usage)
-        # 确保返回的是有效的JSON
-        if [ -n "$cpu_usage" ]; then
-            status+="\"cpu_usage\": $cpu_usage,"
+        if echo "$cpu_usage" | jq empty >/dev/null 2>&1; then
+            jq --argjson cpu "$cpu_usage" '. + {cpu_usage: $cpu}' "$temp_json" > "$temp_json.tmp" && mv "$temp_json.tmp" "$temp_json"
         fi
     fi
     
     # 添加内存信息
     if [ "$(get_config_value "enable_memory_info" "true")" = "true" ]; then
         local memory_info=$(get_memory_info)
-        # 确保返回的是有效的JSON
-        if [ -n "$memory_info" ]; then
-            status+="\"memory_info\": $memory_info,"
+        if echo "$memory_info" | jq empty >/dev/null 2>&1; then
+            jq --argjson mem "$memory_info" '. + {memory_info: $mem}' "$temp_json" > "$temp_json.tmp" && mv "$temp_json.tmp" "$temp_json"
         fi
     fi
     
     # 添加温度信息
     if [ "$(get_config_value "enable_temperature" "true")" = "true" ]; then
         local temperature=$(get_temperature)
-        # 确保返回的是有效的JSON数组
-        if [ -n "$temperature" ]; then
-            status+="\"temperature\": $temperature,"
+        if echo "$temperature" | jq empty >/dev/null 2>&1; then
+            jq --argjson temp "$temperature" '. + {temperature: $temp}' "$temp_json" > "$temp_json.tmp" && mv "$temp_json.tmp" "$temp_json"
         fi
     fi
     
     # 添加网络接口信息
     if [ "$(get_config_value "enable_network_info" "true")" = "true" ]; then
         local network_info=$(get_network_info)
-        # 确保返回的是有效的JSON数组
-        if [ -n "$network_info" ]; then
-            status+="\"network_info\": $network_info,"
+        if echo "$network_info" | jq empty >/dev/null 2>&1; then
+            jq --argjson net "$network_info" '. + {network_info: $net}' "$temp_json" > "$temp_json.tmp" && mv "$temp_json.tmp" "$temp_json"
         fi
     fi
     
     # 添加磁盘信息
     if [ "$(get_config_value "enable_disk_info" "true")" = "true" ]; then
         local disk_info=$(get_disk_info)
-        # 确保返回的是有效的JSON
-        if [ -n "$disk_info" ]; then
-            status+="\"disk_info\": $disk_info,"
+        if echo "$disk_info" | jq empty >/dev/null 2>&1; then
+            jq --argjson disk "$disk_info" '. + {disk_info: $disk}' "$temp_json" > "$temp_json.tmp" && mv "$temp_json.tmp" "$temp_json"
         fi
     fi
     
-    # 移除最后一个逗号并关闭JSON对象
-    status=$(echo "$status" | sed 's/,$//')
-    status+="}"
-    
-    # 确保最终输出是有效的JSON
-    echo "$status" | jq . 2>/dev/null || echo '{"error": "Failed to generate valid JSON"}'
+    # 输出最终结果
+    cat "$temp_json"
 }
 
 # 启动HTTP服务器
 start_http_server() {
     log_message "HTTP服务器开始监听端口: ${PORT}"
+    
     while true; do
+        # 使用nc监听端口并处理请求
         {
             # 读取请求行
-            local request_line=""
-            if ! read -r request_line; then
-                # 如果读取失败，等待一下再继续循环
-                sleep 0.1
-                return 1
+            if IFS= read -r request_line; then
+                log_message "收到请求: $request_line"
+                
+                # 解析请求方法和路径
+                local request_method=$(echo "$request_line" | awk '{print $1}')
+                local request_path=$(echo "$request_line" | awk '{print $2}')
+                [ -z "$request_path" ] && request_path="/"
+                
+                log_message "处理请求: $request_method $request_path"
+                
+                # 读取并忽略请求头
+                local header_line
+                while IFS= read -r header_line && [ -n "$header_line" ]; do
+                    # 移除\r字符
+                    header_line=$(echo "$header_line" | tr -d '\r')
+                    # 检查是否为空行（请求头结束）
+                    [ -z "$header_line" ] && break
+                done
+                
+                # 处理请求
+                handle_request "$request_method" "$request_path" ""
             fi
-            
-            # 检查请求行是否为空
-            if [ -z "$request_line" ]; then
-                sleep 0.1
-                return 1
-            fi
-            
-            log_message "收到请求: $request_line"
-
-            # 临时变量存储 Content-Length
-            local content_length=""
-            local header_line
-
-            # 读取所有请求头
-            while IFS= read -r header_line && [ -n "$header_line" ]; do
-                # 移除可能的 \r 字符
-                header_line=$(echo "$header_line" | tr -d '\r')
-                # 检查是否为空行（请求头结束）
-                if [ -z "$header_line" ]; then
-                    break
-                fi
-                # 记录请求头（可选）
-                log_message "请求头: $header_line"
-                # 提取 Content-Length
-                if echo "$header_line" | grep -iq "content-length"; then
-                    content_length=$(echo "$header_line" | awk '{print $2}')
-                fi
-            done
-
-            # 解析请求方法和路径
-            local request_method=$(echo "$request_line" | awk '{print $1}')
-            local request_path=$(echo "$request_line" | awk '{print $2}')
-            [ -z "$request_path" ] && request_path="/"
-
-            log_message "处理请求: $request_method $request_path"
-
-            # 处理请求并传入 content_length（用于POST）
-            handle_request "$request_method" "$request_path" "$content_length"
-        } | nc -l -p "$PORT" -q 1 2>/dev/null || true
-        
-        # 检查nc命令是否成功运行
-        if [ $? -ne 0 ]; then
-            log_message "警告: HTTP服务器遇到错误"
-        fi
+        } | nc -l -p "$PORT" 2>/dev/null
         
         sleep 0.1
     done
@@ -441,6 +411,8 @@ handle_request() {
     local request_path=$2
     local content_length_header=$3
 
+    log_message "开始处理请求: $request_method $request_path"
+    
     # 处理CORS预检请求
     if [ "$request_method" = "OPTIONS" ]; then
         local response="HTTP/1.1 200 OK\r\n"
@@ -450,17 +422,17 @@ handle_request() {
         response+="Content-Length: 0\r\n"
         response+="Connection: close\r\n"
         response+="\r\n"
+        log_message "返回OPTIONS响应"
         echo -e "$response"
         return
     fi
 
     if [ "$request_path" = "/" ]; then
-        # 返回API说明信息
-        local api_info=$(cat <<'EOF'
+        local api_info=$(cat <<EOF
 {
-  "message": "ISAPI系统监控服务",
-  "description": "提供系统监控数据的API接口",
-  "api_endpoints": {
+  "message": "ISAPI - 系统监控工具",
+  "version": "1.0.0",
+  "endpoints": {
     "get_status": {
       "method": "GET",
       "path": "/api/status",
@@ -496,8 +468,10 @@ EOF
         response+="Connection: close\r\n"
         response+="\r\n"
         response+="$api_info"
+        log_message "返回根路径响应"
         echo -e "$response"
     elif [ "$request_path" = "/api/status" ]; then
+        log_message "处理/api/status请求"
         # 返回JSON数据
         if [ -f "$STATUS_FILE" ] && [ -s "$STATUS_FILE" ]; then
             local file_content=$(cat "$STATUS_FILE")
@@ -513,6 +487,7 @@ EOF
                 response+="Connection: close\r\n"
                 response+="\r\n"
                 response+="$file_content"
+                log_message "返回状态数据"
                 echo -e "$response"
             else
                 # 内容不是有效的JSON
@@ -527,6 +502,7 @@ EOF
                 response+="Connection: close\r\n"
                 response+="\r\n"
                 response+="$error_response"
+                log_message "返回状态数据格式错误"
                 echo -e "$response"
             fi
         else
@@ -538,9 +514,11 @@ EOF
             response+="Connection: close\r\n"
             response+="\r\n"
             response+='{"error": "No data available"}'
+            log_message "状态数据文件不存在"
             echo -e "$response"
         fi
     elif [ "$request_path" = "/api/log" ]; then
+        log_message "处理/api/log请求"
         # 返回日志内容
         if [ -f "$LOG_FILE" ] && [ -s "$LOG_FILE" ]; then
             local content=$(tail -n 50 "$LOG_FILE")
@@ -554,6 +532,7 @@ EOF
             response+="Connection: close\r\n"
             response+="\r\n"
             response+="$content"
+            log_message "返回日志数据"
             echo -e "$response"
         else
             local response="HTTP/1.1 404 Not Found\r\n"
@@ -564,9 +543,11 @@ EOF
             response+="Connection: close\r\n"
             response+="\r\n"
             response+="暂无日志"
+            log_message "日志文件不存在"
             echo -e "$response"
         fi
     elif [ "$request_path" = "/api/config" ] && [ "$request_method" = "POST" ]; then
+        log_message "处理POST /api/config请求"
         # 处理配置更新请求
         local post_data=""
         if [ -n "$content_length_header" ] && [ "$content_length_header" -gt 0 ]; then
@@ -587,8 +568,10 @@ EOF
         response+="Connection: close\r\n"
         response+="\r\n"
         response+='{"status": "success", "message": "配置更新成功，将在下次数据收集时生效"}'
+        log_message "返回配置更新响应"
         echo -e "$response"
     elif [ "$request_path" = "/api/config" ] && [ "$request_method" = "GET" ]; then
+        log_message "处理GET /api/config请求"
         # 返回当前配置
         if [ -f "$CONFIG_FILE" ]; then
             local config_content=$(cat "$CONFIG_FILE")
@@ -602,6 +585,7 @@ EOF
             response+="Connection: close\r\n"
             response+="\r\n"
             response+="$config_content"
+            log_message "返回配置数据"
             echo -e "$response"
         else
             local response="HTTP/1.1 404 Not Found\r\n"
@@ -612,9 +596,11 @@ EOF
             response+="Connection: close\r\n"
             response+="\r\n"
             response+='{"error": "Config file not found"}'
+            log_message "配置文件不存在"
             echo -e "$response"
         fi
     else
+        log_message "处理未知请求: $request_method $request_path"
         # 其他路径返回404
         local response="HTTP/1.1 404 Not Found\r\n"
         response+="Content-Type: application/json; charset=utf-8\r\n"
